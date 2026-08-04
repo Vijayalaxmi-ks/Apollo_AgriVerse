@@ -88,13 +88,30 @@ Raw/mulching.csv
 
 ---
 
+# Dataset 5 : Crop Lifecycle
+
+**File**
+Raw/crop_lifecycle.csv
+
+| Feature | Data Type | Description | Expected Range |
+|----------|-----------|-------------|----------------|
+| farm_id | String | Farm Reference | Matches farm_metadata |
+| crop_type | Category | Crop Grown | Matches farm_metadata |
+| sowing_date | Date | Crop Sowing Date | YYYY-MM-DD |
+| crop_age_days | Integer | Crop Age | 1–150 Days |
+| growth_stage | Category | Current Growth Stage | Seed, Germination, Vegetative, Flowering, Fruiting, Maturity, Harvest |
+| plant_height_cm | Float | Plant Height | 5–250 cm |
+| leaf_area_index | Float | Leaf Area Index | 0.5–6 |
+| chlorophyll_index | Float | Chlorophyll Content | 20–70 |
+| canopy_cover_percent | Float | Canopy Coverage | 5–100 % |
+| expected_harvest_date | Date | Estimated Harvest Date | YYYY-MM-DD |
+
 # Relationships
 
 - Every `farm_id` must exist in `farm_metadata.csv`.
-- Every timestamped dataset references a valid farm.
-- All datasets use consistent units.
-- No duplicate records.
-- No missing values after cleaning.
+- `crop_type` must match the crop assigned in `farm_metadata.csv`.
+- Crop age and growth stage must be logically consistent.
+- Harvest date must always be later than sowing date.
 
 ---
 
@@ -107,16 +124,20 @@ Synthetic/
 │   ├── farm_metadata.csv
 │   ├── sensor_stream.csv
 │   ├── hydrogel.csv
-│   └── mulching.csv
+│   ├── mulching.csv
+│   └── crop_lifecycle.csv
 │
 ├── Cleaned/
 │   ├── farm_metadata_clean.csv
 │   ├── sensor_stream_clean.csv
 │   ├── hydrogel_clean.csv
-│   └── mulching_clean.csv
+│   ├── mulching_clean.csv
+│   └── crop_lifecycle_clean.csv
 │
 ├── generators/
+│
 ├── notebooks/
+│
 └── SYNTHETIC_DATA_DICTIONARY.md
 ```
 
