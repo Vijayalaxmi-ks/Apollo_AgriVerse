@@ -66,3 +66,5 @@ df.to_csv(output, index=False)
 print(df.head())
 
 print(f"\nGenerated {len(df)} records.")
+
+

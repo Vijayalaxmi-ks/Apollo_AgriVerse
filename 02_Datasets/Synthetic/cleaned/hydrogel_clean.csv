@@ -9999,3 +9999,4 @@ timestamp,farm_id,water_storage,release_rate,remaining_capacity,status
 2026-02-04 17:05:00,F0633,96.86,4.73,87.27,Healthy
 2026-02-04 17:10:00,F0915,88.26,2.65,70.54,Low
 2026-02-04 17:15:00,F0348,99.43,4.17,67.96,Critical
+
