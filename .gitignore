@@ -13,6 +13,10 @@ __pycache__/
 .venv/
 venv/
 env/
+<<<<<<< HEAD
+=======
+myenv/
+>>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
 
 # ==========================================
 # Environment Variables (Secrets)
@@ -46,7 +50,12 @@ temp/*
 # VS Code
 # ==========================================
 
+<<<<<<< HEAD
 .vscode/settings.json
+=======
+.vscode/
+!.vscode/extensions.json
+>>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
 
 # ==========================================
 # Build Files
@@ -70,4 +79,28 @@ htmlcov/
 
 .DS_Store
 Thumbs.db
+<<<<<<< HEAD
 Desktop.ini
+=======
+Desktop.ini
+
+# ==========================================
+# IDE
+# ==========================================
+
+.idea/
+
+# ==========================================
+# Python Packaging
+# ==========================================
+
+pip-wheel-metadata/
+
+# ==========================================
+# Cache
+# ==========================================
+
+.cache/
+
+02_Datasets/
+>>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
