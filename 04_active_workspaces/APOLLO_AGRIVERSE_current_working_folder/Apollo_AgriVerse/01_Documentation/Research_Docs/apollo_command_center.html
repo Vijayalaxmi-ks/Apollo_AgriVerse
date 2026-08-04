@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apollo Agriverse | Planetary Command</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
+        
+        body {
+            background-color: #050914;
+            color: #e2e8f0;
+            font-family: 'Rajdhani', sans-serif;
+            overflow-x: hidden;
+        }
+        
+        h1, h2, h3, .orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .glass-panel {
+            background: rgba(16, 25, 43, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .glow-text {
+            text-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+        }
+
+        .status-pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        /* Radar Scanner CSS */
+        .radar {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            background: 
+                radial-gradient(circle, rgba(56,189,248,0.05) 0%, rgba(5,9,20,0) 70%),
+                repeating-radial-gradient(rgba(56, 189, 248, 0.1) 0, rgba(56, 189, 248, 0.1) 1px, transparent 1px, transparent 15%);
+            overflow: hidden;
+        }
+        .radar::before {
+            content: ' ';
+            display: block;
+            position: absolute;
+            width: 50%;
+            height: 50%;
+            bottom: 50%;
+            right: 50%;
+            border-right: 2px solid rgba(56, 189, 248, 0.8);
+            border-bottom: 2px solid rgba(56, 189, 248, 0.8);
+            border-bottom-right-radius: 100%;
+            background-image: linear-gradient(45deg, rgba(56, 189, 248, 0) 40%, rgba(56, 189, 248, 0.6) 100%);
+            transform-origin: 100% 100%;
+            animation: scan 4s linear infinite;
+        }
+        @keyframes scan {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header / Navigation -->
+    <header class="glass-panel border-b-0 border-t-4 border-t-cyan-500 py-4 px-6 flex justify-between items-center z-10 sticky top-0">
+        <div class="flex items-center gap-4">
+            <i class="fa-solid fa-satellite text-cyan-400 text-3xl"></i>
+            <div>
+                <h1 class="text-2xl font-bold tracking-widest text-white glow-text">APOLLO <span class="text-cyan-400">AGRIVERSE</span></h1>
+                <p class="text-xs text-cyan-700 tracking-[0.3em] uppercase">Planetary Intelligence Engine v2.0</p>
+            </div>
+        </div>
+        <div class="flex gap-6 items-center">
+            <div class="text-right">
+                <p class="text-sm text-gray-400">SAT-LINK STATUS</p>
+                <p class="text-green-400 font-bold tracking-wider"><span class="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 status-pulse"></span>ACTIVE (INSAT-3DR)</p>
+            </div>
+            <div class="text-right border-l border-gray-700 pl-6">
+                <p class="text-sm text-gray-400">TARGET WINDOW</p>
+                <p class="text-cyan-400 font-bold tracking-wider font-mono">T+ 72:00:00</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Dashboard -->
+    <main class="flex-grow p-6 grid grid-cols-12 gap-6">
+        
+        <!-- Left Sidebar: Operations Constraints -->
+        <aside class="col-span-12 lg:col-span-3 flex flex-col gap-6">
+            
+            <div class="glass-panel p-5 rounded-lg border-l-4 border-l-red-500">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-lg text-gray-200 orbitron">Terrain Operability</h3>
+                    <i class="fa-solid fa-tractor text-red-500 text-xl"></i>
+                </div>
+                <p class="text-3xl font-bold text-white font-mono">CRITICAL</p>
+                <p class="text-sm text-gray-400 mt-2">Sentinel-1 SAR detects 82% soil saturation in Sector 7. Heavy machinery operation suspended in T+ 24hrs to prevent chassis sinkage.</p>
+            </div>
+
+            <div class="glass-panel p-5 rounded-lg border-l-4 border-l-orange-400">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-lg text-gray-200 orbitron">Livestock Thermal Stress</h3>
+                    <i class="fa-solid fa-cow text-orange-400 text-xl"></i>
+                </div>
+                <p class="text-3xl font-bold text-white font-mono">WARNING</p>
+                <p class="text-sm text-gray-400 mt-2">ECOSTRESS identifies +4.2°C ambient rise in pastoral zones over next 48h. Evaporative cooling systems auto-triggered for cattle housing.</p>
+            </div>
+
+            <div class="glass-panel p-5 rounded-lg border-l-4 border-l-green-500">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="text-lg text-gray-200 orbitron">Logistics Routing</h3>
+                    <i class="fa-solid fa-truck-fast text-green-500 text-xl"></i>
+                </div>
+                <p class="text-3xl font-bold text-white font-mono">OPTIMAL</p>
+                <p class="text-sm text-gray-400 mt-2">Fleet rerouted via Highway B. Avoiding projected 100mm flash flood zone (T+ 60h). Market supply chain integrity at 100%.</p>
+            </div>
+        </aside>
+
+        <!-- Center: Satellite / Radar View -->
+        <section class="col-span-12 lg:col-span-6 relative flex flex-col">
+            <div class="glass-panel rounded-lg p-2 h-full min-h-[500px] flex flex-col relative overflow-hidden">
+                <div class="absolute top-4 left-4 z-10 bg-black/60 px-3 py-1 border border-cyan-800 rounded">
+                    <p class="text-xs text-cyan-400 font-mono">MULTI-SPECTRAL FUSION (NDVI + THERMAL)</p>
+                </div>
+                <div class="absolute top-4 right-4 z-10 flex gap-2">
+                    <button class="bg-cyan-900/50 hover:bg-cyan-800 border border-cyan-600 text-white px-4 py-1 rounded text-sm transition">OPTICAL</button>
+                    <button class="bg-blue-600 border border-blue-400 text-white px-4 py-1 rounded text-sm shadow-[0_0_10px_rgba(59,130,246,0.5)] transition">SYNTHETIC THERMAL</button>
+                    <button class="bg-cyan-900/50 hover:bg-cyan-800 border border-cyan-600 text-white px-4 py-1 rounded text-sm transition">SAR (TERRAIN)</button>
+                </div>
+                
+                <!-- Radar Visual (CSS Only representation) -->
+                <div class="flex-grow flex items-center justify-center p-8">
+                    <div class="w-full max-w-md aspect-square radar relative">
+                        <!-- Simulated target markers -->
+                        <div class="absolute top-1/4 left-1/3 w-2 h-2 bg-red-500 rounded-full shadow-[0_0_8px_red]"></div>
+                        <div class="absolute top-1/2 right-1/4 w-3 h-3 bg-orange-400 rounded-full shadow-[0_0_8px_orange]"></div>
+                        <div class="absolute bottom-1/3 left-1/2 w-2 h-2 bg-cyan-400 rounded-full shadow-[0_0_8px_cyan]"></div>
+                    </div>
+                </div>
+
+                <div class="absolute bottom-4 left-0 w-full px-6 flex justify-between items-end">
+                    <div>
+                        <p class="text-xs text-gray-500">LAT: 17.6715 N | LON: 75.9011 E</p>
+                        <p class="text-xs text-gray-500">ALT: 800KM (LEO) / 35,786KM (GEO)</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-lg font-bold text-cyan-400 orbitron glow-text">AI GNN MODEL STATUS: NOMINAL</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Sidebar: Predictive Analytics -->
+        <aside class="col-span-12 lg:col-span-3 flex flex-col gap-6">
+            <div class="glass-panel p-5 rounded-lg flex-grow">
+                <h3 class="text-lg text-gray-200 orbitron mb-4 border-b border-gray-700 pb-2"><i class="fa-solid fa-chart-line mr-2 text-cyan-400"></i> 72-Hour Precipitation & Wind Risk</h3>
+                <div class="relative h-48 w-full mt-4">
+                    <canvas id="predictionChart"></canvas>
+                </div>
+                <div class="mt-6">
+                    <h4 class="text-sm text-gray-400 mb-2">RESOURCE ALLOCATION PROTOCOL</h4>
+                    <ul class="space-y-3">
+                        <li class="flex justify-between items-center text-sm border border-gray-700 bg-gray-800/50 p-2 rounded">
+                            <span>Labor Deployment</span>
+                            <span class="text-red-400 font-bold">HALT (T+36h)</span>
+                        </li>
+                        <li class="flex justify-between items-center text-sm border border-gray-700 bg-gray-800/50 p-2 rounded">
+                            <span>Feedstock Securing</span>
+                            <span class="text-green-400 font-bold">ACCELERATE</span>
+                        </li>
+                        <li class="flex justify-between items-center text-sm border border-gray-700 bg-gray-800/50 p-2 rounded">
+                            <span>Irrigation Systems</span>
+                            <span class="text-gray-500 font-bold">STANDBY</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </aside>
+
+    </main>
+
+    <script>
+        // Initialize Chart.js for the 72-hour prediction curve
+        const ctx = document.getElementById('predictionChart').getContext('2d');
+        
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.font.family = "'Rajdhani', sans-serif";
+
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['Now', '+12h', '+24h', '+36h', '+48h', '+60h', '+72h'],
+                datasets: [
+                    {
+                        label: 'Precipitation Risk (%)',
+                        data: [5, 10, 15, 85, 95, 40, 10],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        fill: true
+                    },
+                    {
+                        label: 'Wind Gusts (km/h)',
+                        data: [15, 18, 25, 60, 75, 30, 20],
+                        borderColor: '#f59e0b',
+                        borderDash: [5, 5],
+                        borderWidth: 2,
+                        tension: 0.4,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { boxWidth: 12, font: { size: 10 } }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                    },
+                    y: {
+                        grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                        min: 0,
+                        max: 100
+                    },
+                    y1: {
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        min: 0,
+                        max: 100
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
