@@ -15,7 +15,10 @@ venv/
 env/
 <<<<<<< HEAD
 =======
+<<<<<<< HEAD
+=======
 myenv/
+>>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
 >>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
 
 # ==========================================
@@ -51,10 +54,13 @@ temp/*
 # ==========================================
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 .vscode/settings.json
+=======
 =======
 .vscode/
 !.vscode/extensions.json
+>>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
 >>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
 
 # ==========================================
@@ -80,7 +86,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 <<<<<<< HEAD
+<<<<<<< HEAD
 Desktop.ini
+=======
 =======
 Desktop.ini
 
@@ -103,4 +111,4 @@ pip-wheel-metadata/
 .cache/
 
 02_Datasets/
->>>>>>>>> Temporary merge branch 2
+>>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
