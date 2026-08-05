@@ -1,23 +1,49 @@
+# Environment and secrets
 .env
 .env.*
 !.env.example
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-node_modules/
-.DS_Store
-.idea/
-.vscode/settings.json
-*.log
-coverage/
-dist/
-build/
-tmp/
-temp/
-03_data_and_resources/raw_private/
-07_models_and_artifacts/binaries/
 *.pem
 *.key
 *credentials*.json
 *service-account*.json
+
+# Python and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+myenv/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+pip-wheel-metadata/
+
+# Notebooks, builds and caches
+.ipynb_checkpoints/
+node_modules/
+build/
+dist/
+coverage/
+.cache/
+
+# Local runtime output
+logs/*
+!logs/.gitkeep
+temp/*
+!temp/.gitkeep
+tmp/
+
+# Editors and operating systems
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Project-specific non-versioned assets
+03_data_and_resources/raw_private/
+07_models_and_artifacts/binaries/

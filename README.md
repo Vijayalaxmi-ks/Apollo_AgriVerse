@@ -1,4 +1,6 @@
-# MindForgeAI Industry Project — Master Workspace
+# Apollo AgriVerse — MindForgeAI Master Workspace
+
+This repository is the canonical workspace for the Apollo AgriVerse project. Apollo assets are organized across the master folders: project definition, research and data resources, code, reports, deployment, and presentation materials.
 
 This repository is the standard 30-day engineering workspace for every Internship 1.0 project group. Clone it once for the group. Preserve this structure. Add work inside the correct folder instead of creating unrelated folders at the root.
 
