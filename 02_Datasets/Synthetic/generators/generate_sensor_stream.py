@@ -1,54 +1,32 @@
-"""
-Apollo AgriVerse
-Synthetic Sensor Stream Generator
-
-Output:
-02_Datasets/Synthetic/Raw/sensor_stream.csv
-"""
-
-import random
 import pandas as pd
-from pathlib import Path
+import numpy as np
+import os
 
-random.seed(42)
+np.random.seed(42)
 
-# Read farm ids
-base = Path(__file__).parent.parent
-farm_df = pd.read_csv(base / "Raw" / "farm_metadata.csv")
-farm_ids = farm_df["farm_id"].tolist()
+raw_farm_path = "../raw/farm_metadata.csv"
+farm_meta = pd.read_csv(raw_farm_path)
+farm_ids = farm_meta['farm_id'].tolist()
 
-rows = []
+ROWS = 10000
+selected_farms = np.random.choice(farm_ids, size=ROWS)
+timestamps = pd.date_range(start='2026-01-01 00:00:00', periods=ROWS, freq='5min')
 
-start = pd.Timestamp("2026-01-01 00:00:00")
+df_raw = pd.DataFrame({
+    'timestamp': timestamps.strftime('%Y-%m-%d %H:%M:%S'),
+    'farm_id': selected_farms,
+    'temperature': np.round(np.random.uniform(18.0, 38.0, ROWS), 2),
+    'humidity': np.round(np.random.uniform(35.0, 90.0, ROWS), 2),
+    'soil_moisture': np.round(np.random.uniform(15.0, 85.0, ROWS), 2),
+    'soil_temperature': np.round(np.random.uniform(15.0, 35.0, ROWS), 2),
+    'light_intensity': np.random.randint(1000, 85000, size=ROWS),
+    'battery_level': np.round(np.random.uniform(40.0, 100.0, ROWS), 2)
+})
 
-for i in range(10000):
+raw_path = "../raw/sensor_stream.csv"
+clean_path = "../cleaned/sensor_stream_clean.csv"
 
-    rows.append({
+df_raw.to_csv(raw_path, index=False)
+df_raw.to_csv(clean_path, index=False)
 
-        "timestamp": start + pd.Timedelta(minutes=5*i),
-
-        "farm_id": random.choice(farm_ids),
-
-        "temperature": round(random.uniform(18,42),2),
-
-        "humidity": round(random.uniform(30,95),2),
-
-        "soil_moisture": round(random.uniform(15,90),2),
-
-        "soil_temperature": round(random.uniform(15,38),2),
-
-        "light_intensity": random.randint(1000,100000),
-
-        "battery_level": round(random.uniform(20,100),2)
-
-    })
-
-df = pd.DataFrame(rows)
-
-output = base / "Raw" / "sensor_stream.csv"
-
-df.to_csv(output,index=False)
-
-print(df.head())
-
-print(f"\nGenerated {len(df)} records.")
+print(f"[3/5] Sensor Stream generated: {ROWS} telemetry rows.")

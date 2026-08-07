@@ -41,3 +41,13 @@ temp/*
 .DS_Store
 Thumbs.db
 Desktop.ini
+02_Datasets/
+
+# Allow tracking of generators, master notebooks, and processed grape datasets
+!02_Datasets/Synthetic/generators/
+!02_Datasets/Synthetic/generators/*.py
+!02_Datasets/Master/
+!02_Datasets/Master/*.ipynb
+!02_Datasets/Processed/Grapes/
+!02_Datasets/Processed/Grapes/*.csv
+>>>>>>> ca1065c (feat: updated synthetic generators, validations, and master notebook for grape pivot)

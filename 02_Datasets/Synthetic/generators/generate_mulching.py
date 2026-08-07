@@ -1,70 +1,37 @@
-"""
-Apollo AgriVerse
-Synthetic Mulching Dataset Generator
-
-Output:
-02_Datasets/Synthetic/Raw/mulching.csv
-"""
-
-import random
 import pandas as pd
-from pathlib import Path
+import numpy as np
+import os
 
-random.seed(42)
+np.random.seed(42)
 
-base = Path(__file__).parent.parent
+raw_farm_path = "../raw/farm_metadata.csv"
+farm_meta = pd.read_csv(raw_farm_path)
+farm_ids = farm_meta['farm_id'].tolist()
 
-farm_df = pd.read_csv(base / "Raw" / "farm_metadata.csv")
-farm_ids = farm_df["farm_id"].tolist()
+ROWS = 10000
+selected_farms = np.random.choice(farm_ids, size=ROWS)
+timestamps = pd.date_range(start='2026-01-01 00:00:00', periods=ROWS, freq='5min')
 
-mulch_types = [
-    "Plastic",
-    "Organic",
-    "Biodegradable"
-]
+mulch_types = np.random.choice(['Plastic', 'Organic', 'Biodegradable'], size=ROWS, p=[0.5, 0.3, 0.2])
+degradation = np.random.uniform(0.0, 100.0, ROWS)
+status = np.where(degradation < 40, 'Healthy', np.where(degradation < 75, 'Needs Replacement', 'Damaged'))
 
-rows = []
+df_raw = pd.DataFrame({
+    'timestamp': timestamps.strftime('%Y-%m-%d %H:%M:%S'),
+    'farm_id': selected_farms,
+    'mulch_type': mulch_types,
+    'degradation_percent': np.round(degradation, 2),
+    'evaporation_reduction': np.round(np.random.uniform(15.0, 65.0, ROWS), 2),
+    'temperature_reduction': np.round(np.random.uniform(1.0, 7.5, ROWS), 2),
+    'status': status
+})
 
-start = pd.Timestamp("2026-01-01 00:00:00")
+raw_path = "../raw/mulching.csv"
+clean_path = "../cleaned/mulching_clean.csv"
 
-for i in range(10000):
+df_raw.to_csv(raw_path, index=False)
+df_raw.to_csv(clean_path, index=False)
 
-    degradation = round(random.uniform(0,100),2)
-
-    evaporation = round(random.uniform(10,70),2)
-
-    temp_reduction = round(random.uniform(1,8),2)
-
-    rows.append({
-
-        "timestamp": start + pd.Timedelta(minutes=5*i),
-
-        "farm_id": random.choice(farm_ids),
-
-        "mulch_type": random.choice(mulch_types),
-
-        "degradation_percent": degradation,
-
-        "evaporation_reduction": evaporation,
-
-        "temperature_reduction": temp_reduction,
-
-        "status": random.choice([
-            "Healthy",
-            "Needs Replacement",
-            "Damaged"
-        ])
-
-    })
-
-df = pd.DataFrame(rows)
-
-output = base / "Raw" / "mulching.csv"
-
-df.to_csv(output, index=False)
-
-print(df.head())
-
-print(f"\nGenerated {len(df)} records.")
+print(f"[5/5] Mulching Stream generated: {ROWS} mulch film rows.")
 
 

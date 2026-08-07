@@ -1,56 +1,33 @@
-"""
-Apollo AgriVerse
-Synthetic Hydrogel Generator
-
-Output:
-02_Datasets/Synthetic/Raw/hydrogel.csv
-"""
-
-import random
 import pandas as pd
-from pathlib import Path
+import numpy as np
+import os
 
-random.seed(42)
+np.random.seed(42)
 
-base = Path(__file__).parent.parent
+raw_farm_path = "../raw/farm_metadata.csv"
+farm_meta = pd.read_csv(raw_farm_path)
+farm_ids = farm_meta['farm_id'].tolist()
 
-farm_df = pd.read_csv(base / "Raw" / "farm_metadata.csv")
-farm_ids = farm_df["farm_id"].tolist()
+ROWS = 10000
+selected_farms = np.random.choice(farm_ids, size=ROWS)
+timestamps = pd.date_range(start='2026-01-01 00:00:00', periods=ROWS, freq='5min')
 
-rows = []
+water_storage = np.random.uniform(10.0, 100.0, ROWS)
+status = np.where(water_storage > 50, 'Healthy', np.where(water_storage > 20, 'Low', 'Critical'))
 
-start = pd.Timestamp("2026-01-01 00:00:00")
+df_raw = pd.DataFrame({
+    'timestamp': timestamps.strftime('%Y-%m-%d %H:%M:%S'),
+    'farm_id': selected_farms,
+    'water_storage': np.round(water_storage, 2),
+    'release_rate': np.round(np.random.uniform(0.2, 4.5, ROWS), 2),
+    'remaining_capacity': np.round(100.0 - water_storage, 2),
+    'status': status
+})
 
-for i in range(10000):
+raw_path = "../raw/hydrogel.csv"
+clean_path = "../cleaned/hydrogel_clean.csv"
 
-    capacity = round(random.uniform(0,100),2)
+df_raw.to_csv(raw_path, index=False)
+df_raw.to_csv(clean_path, index=False)
 
-    release = round(random.uniform(0.2,5),2)
-
-    storage = round(random.uniform(capacity,100),2)
-
-    rows.append({
-
-        "timestamp": start + pd.Timedelta(minutes=5*i),
-
-        "farm_id": random.choice(farm_ids),
-
-        "water_storage": storage,
-
-        "release_rate": release,
-
-        "remaining_capacity": capacity,
-
-        "status": random.choice(["Healthy","Low","Critical"])
-
-    })
-
-df = pd.DataFrame(rows)
-
-output = base / "Raw" / "hydrogel.csv"
-
-df.to_csv(output,index=False)
-
-print(df.head())
-
-print(f"\nGenerated {len(df)} records.")
+print(f"[4/5] Hydrogel Stream generated: {ROWS} smart polymer rows.")

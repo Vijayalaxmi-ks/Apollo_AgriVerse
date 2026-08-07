@@ -1,57 +1,34 @@
-"""
-Apollo AgriVerse
-Synthetic Dataset Generator
-
-Dataset: Farm Metadata
-Output: ../Raw/farm_metadata.csv
-"""
-
-import random
 import pandas as pd
-from pathlib import Path
+import numpy as np
+import os
 
-random.seed(42)
+np.random.seed(42)
+NUM_FARMS = 1000
 
-N = 1000
+# Major grape belts in Maharashtra (Nashik/Sangli region)
+latitudes = np.random.uniform(19.5, 20.5, NUM_FARMS)
+longitudes = np.random.uniform(73.5, 74.5, NUM_FARMS)
+soil_types = np.random.choice(['Loamy', 'Sandy Loam', 'Black', 'Red', 'Clay Loam'], size=NUM_FARMS, p=[0.4, 0.25, 0.2, 0.1, 0.05])
 
-soil_types = [
-    "Clay",
-    "Sandy",
-    "Loamy",
-    "Silty",
-    "Black",
-    "Red"
-]
+df_raw = pd.DataFrame({
+    'farm_id': [f'F{i+1:04d}' for i in range(NUM_FARMS)],
+    'field_id': [f'FD{i+1:04d}' for i in range(NUM_FARMS)],
+    'latitude': np.round(latitudes, 6),
+    'longitude': np.round(longitudes, 6),
+    'area_acres': np.round(np.random.uniform(1.0, 12.0, NUM_FARMS), 2),
+    'soil_type': soil_types,
+    'crop_type': 'Grapes',
+    'installation_date': pd.date_range(start='2026-01-01', periods=NUM_FARMS, freq='h').strftime('%Y-%m-%d')
+})
 
-crop_types = [
-    "Cotton",
-    "Wheat",
-    "Rice",
-    "Maize",
-    "Sugarcane",
-    "Soybean"
-]
+# Paths based on workspace layout
+raw_path = "../raw/farm_metadata.csv"
+clean_path = "../cleaned/farm_metadata_clean.csv"
 
-rows = []
+os.makedirs(os.path.dirname(raw_path), exist_ok=True)
+os.makedirs(os.path.dirname(clean_path), exist_ok=True)
 
-for i in range(1, N + 1):
+df_raw.to_csv(raw_path, index=False)
+df_raw.to_csv(clean_path, index=False)
 
-    rows.append({
-        "farm_id": f"F{i:04}",
-        "field_id": f"FD{i:04}",
-        "latitude": round(random.uniform(15.5, 21.5), 6),
-        "longitude": round(random.uniform(72.5, 80.5), 6),
-        "area_acres": round(random.uniform(0.5, 15), 2),
-        "soil_type": random.choice(soil_types),
-        "crop_type": random.choice(crop_types),
-        "installation_date": pd.Timestamp("2026-01-01") + pd.to_timedelta(random.randint(0, 180), unit="D")
-    })
-
-df = pd.DataFrame(rows)
-
-output = Path(__file__).parent.parent / "Raw" / "farm_metadata.csv"
-output.parent.mkdir(parents=True, exist_ok=True)
-
-df.to_csv(output, index=False)
-
-print(f"Saved {len(df)} rows to {output}")
+print(f"[1/5] Farm Metadata generated: {NUM_FARMS} grape farm profiles.")
