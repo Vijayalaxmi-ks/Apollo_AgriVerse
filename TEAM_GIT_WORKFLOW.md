@@ -33,6 +33,23 @@ cd Apollo_AgriVerse
 .\scripts\start-member-work.ps1 YOUR_ID short-task-name
 ```
 
+For a lighter code-and-documentation checkout, skip initial LFS downloads and use sparse checkout. This avoids downloading CSV datasets until they are needed:
+
+```powershell
+$env:GIT_LFS_SKIP_SMUDGE = '1'
+git clone --filter=blob:none --sparse https://github.com/Vijayalaxmi-ks/Apollo_AgriVerse.git
+cd Apollo_AgriVerse
+git sparse-checkout set 01_Documentation 04_Frontend 05_Backend 06_ML 08_Testing 09_Project_Management 10_Presentations 11_Team
+git switch develop
+.\scripts\start-member-work.ps1 YOUR_ID short-task-name
+```
+
+When a task needs an LFS-managed CSV file, download only the required path:
+
+```powershell
+git lfs pull --include="02_Datasets/Raw/Soil/*"
+```
+
 Examples of valid IDs: `DAKSHINI`, `DIKSHA`, `NAINA`, `NANDU`, `VISH`.
 
 The script creates a branch such as `member/dakshini/weather-dashboard` from the latest `origin/develop` and creates `11_Team/DAKSHINI/` for personal notes.
