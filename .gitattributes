@@ -1,1 +1,7 @@
 *.csv filter=lfs diff=lfs merge=lfs -text
+
+# These legacy datasets were committed as ordinary Git blobs before CSVs
+# were configured for LFS. Keep them out of the LFS filter so a clean
+# checkout does not appear as a 5,000-row deletion.
+02_Datasets/Interim/Soil/cleaned_soil_dataset.csv -filter -diff -merge text
+02_Datasets/Processed/Soil/cleaned_soil_dataset.csv -filter -diff -merge text
