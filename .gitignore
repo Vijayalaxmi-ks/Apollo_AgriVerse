@@ -1,114 +1,43 @@
-# ==========================================
-# Python
-# ==========================================
-
+# Python and virtual environments
 __pycache__/
 *.py[cod]
 *$py.class
-
-# ==========================================
-# Virtual Environments
-# ==========================================
-
 .venv/
 venv/
 env/
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
 myenv/
->>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
->>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
 
-# ==========================================
-# Environment Variables (Secrets)
-# ==========================================
-
+# Secrets and local configuration
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*credentials*.json
+*service-account*.json
 
-# ==========================================
-# Jupyter
-# ==========================================
-
+# Notebooks, test output and generated files
 .ipynb_checkpoints/
-
-# ==========================================
-# Logs
-# ==========================================
-
-logs/*
-!logs/.gitkeep
-
-*.log
-
-# ==========================================
-# Temporary Files
-# ==========================================
-
-temp/*
-!temp/.gitkeep
-
-# ==========================================
-# VS Code
-# ==========================================
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-.vscode/settings.json
-=======
-=======
-.vscode/
-!.vscode/extensions.json
->>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
->>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
-
-# ==========================================
-# Build Files
-# ==========================================
-
-build/
-dist/
-*.egg-info/
-
-# ==========================================
-# Testing
-# ==========================================
-
 .pytest_cache/
 .coverage
 htmlcov/
-
-# ==========================================
-# OS Files
-# ==========================================
-
-.DS_Store
-Thumbs.db
-<<<<<<< HEAD
-<<<<<<< HEAD
-Desktop.ini
-=======
-=======
-Desktop.ini
-
-# ==========================================
-# IDE
-# ==========================================
-
-.idea/
-
-# ==========================================
-# Python Packaging
-# ==========================================
-
+build/
+dist/
+*.egg-info/
 pip-wheel-metadata/
-
-# ==========================================
-# Cache
-# ==========================================
-
 .cache/
 
-02_Datasets/
->>>>>>> c77d55ff9c3fc9a78594badef1bc9786f3bd3e24
+# Local logs and temporary output
+logs/*
+!logs/.gitkeep
+temp/*
+!temp/.gitkeep
+*.log
+
+# Editors and operating systems
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
