@@ -1,0 +1,32 @@
+{
+  "grape": {
+    "budbreak": {
+      "moisture_pct": { "min": 30.0, "optimal": 45.0, "max": 60.0 },
+      "soil_temp_c": { "min": 15.0, "optimal": 22.0, "max": 30.0 },
+      "nitrogen_mgkg": { "min": 40.0, "optimal": 60.0 },
+      "phosphorus_mgkg": { "min": 25.0, "optimal": 40.0 },
+      "potassium_mgkg": { "min": 120.0, "optimal": 180.0 }
+    },
+    "flowering": {
+      "moisture_pct": { "min": 35.0, "optimal": 50.0, "max": 65.0 },
+      "soil_temp_c": { "min": 18.0, "optimal": 25.0, "max": 32.0 },
+      "nitrogen_mgkg": { "min": 50.0, "optimal": 75.0 },
+      "phosphorus_mgkg": { "min": 30.0, "optimal": 50.0 },
+      "potassium_mgkg": { "min": 150.0, "optimal": 220.0 }
+    },
+    "veraison": {
+      "moisture_pct": { "min": 25.0, "optimal": 38.0, "max": 50.0 },
+      "soil_temp_c": { "min": 20.0, "optimal": 28.0, "max": 35.0 },
+      "nitrogen_mgkg": { "min": 30.0, "optimal": 45.0 },
+      "phosphorus_mgkg": { "min": 20.0, "optimal": 35.0 },
+      "potassium_mgkg": { "min": 180.0, "optimal": 260.0 }
+    },
+    "harvest": {
+      "moisture_pct": { "min": 20.0, "optimal": 30.0, "max": 45.0 },
+      "soil_temp_c": { "min": 18.0, "optimal": 26.0, "max": 34.0 },
+      "nitrogen_mgkg": { "min": 20.0, "optimal": 35.0 },
+      "phosphorus_mgkg": { "min": 15.0, "optimal": 30.0 },
+      "potassium_mgkg": { "min": 140.0, "optimal": 200.0 }
+    }
+  }
+}

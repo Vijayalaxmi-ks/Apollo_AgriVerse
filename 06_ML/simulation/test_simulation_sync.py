@@ -34,7 +34,6 @@ def run_simulation_test():
         print(f"  Hydrogel Release   : {twin['hydrogel']['hydrogel_release_rate_lhr']} L/hr (Storage: {twin['hydrogel']['hydrogel_water_storage_pct']}%)")
         print(f"  -> ML Hydrogel Req : {ml['predicted_required_hydrogel_storage_pct']}%")
         print(f"  -> ML Predicted Yield: {ml['predicted_grape_yield_tons_ha']} tons/ha\n")
-
     print("=======================================================")
     print("  SIMULATION TEST PASSED SUCCESSFULLY!                 ")
     print("=======================================================")
