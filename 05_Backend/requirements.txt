@@ -1,0 +1,45 @@
+# ==========================================
+# APOLLO AGRIVERSE - REQUIREMENTS SUMMARY
+# ==========================================
+
+# 1. Core Data Processing & Math
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.2.0
+
+# 2. Web Requests & API Handling
+requests>=2.31.0
+urllib3>=2.0.0
+
+# 3. Financial & Market Data (Global Futures)
+yfinance>=0.2.30
+
+# 4. Geospatial & Satellite Intelligence (NASA/ISRO/Google)
+earthengine-api>=0.1.370
+geemap>=0.28.0
+
+# 5. Advanced Machine Learning (ST-GNN)
+# Note: PyTorch installation varies based on your GPU/CUDA setup.
+# These are the standard CPU/CUDA-compatible packages.
+# 
+# IMPORTANT: Python 3.14 compatibility issue:
+# torch-scatter and torch-sparse don't have pre-built wheels for Python 3.14 yet
+# This affects: torch-geometric-temporal
+# 
+# Solution options:
+# 1. Use Python 3.12 or 3.11 (recommended for full PyG support)
+# 2. Install C++ build tools (Microsoft Visual C++ 14.0 or greater)
+# 3. Install torch-geometric without temporal support:
+#    pip install torch-geometric
+#
+# Installation for Python 3.12/3.11 (full support):
+#   pip install torch>=2.0.0
+#   pip install torch-geometric -f https://data.pyg.org/whl/torch-2.0.0+cpu.html
+#   pip install torch-geometric-temporal
+#   (For GPU: replace +cpu with +cu117 or +cu118 based on CUDA version)
+torch>=2.0.0
+torch-geometric>=2.3.0
+# torch-geometric-temporal>=0.54.0  # Requires torch-sparse (unavailable for Python 3.14)
+
+# 6. Interactive UI & Dashboards (Optional but recommended)
+streamlit>=1.28.0
