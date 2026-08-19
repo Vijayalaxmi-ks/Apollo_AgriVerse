@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #060b12;
+  --panel: #0f1722;
+  --panel-2: #16202d;
+  --border: #1e2d40;
+  --accent: #10b981;
+  --text: #e2e8f0;
+}
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+}
+
+* { box-sizing: border-box; }
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e2d40; border-radius: 4px; }
+
+.glass {
+  background: rgba(15, 23, 34, 0.88);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.field-glow {
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.55), 0 0 20px rgba(16, 185, 129, 0.25);
+}
+
+@keyframes pulse-gel {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+.gel-pulse { animation: pulse-gel 2.4s ease-in-out infinite; }
+
+@keyframes grow-up {
+  from { transform: scaleY(0.25); opacity: 0.3; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+.grow-anim { animation: grow-up 0.7s ease-out forwards; transform-origin: bottom center; }
