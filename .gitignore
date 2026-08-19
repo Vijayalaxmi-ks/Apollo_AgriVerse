@@ -41,7 +41,11 @@ temp/*
 .DS_Store
 Thumbs.db
 Desktop.ini
+# Ignore raw dataset files
 02_Datasets/
+
+# Whitelist the KnowledgeBase folder for suitability CSVs
+!02_Datasets/KnowledgeBase/
 
 # Allow tracking of generators, master notebooks, and processed grape datasets
 !02_Datasets/Synthetic/generators/
