@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Apollo AgriVerse – Digital Twin Preview</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.294.0/lucide.min.css" />
+<style>
+  body { margin:0; background:#060B12; color:#e2e8f0; font-family: Inter, system-ui, sans-serif; overflow:hidden; height:100vh; }
+  .field-glow { box-shadow: 0 0 0 2px rgba(16,185,129,0.55), 0 0 18px rgba(16,185,129,0.25); }
+  @keyframes pulse-gel { 0%,100%{transform:scale(1);opacity:.85} 50%{transform:scale(1.15);opacity:1} }
+  .gel-pulse { animation: pulse-gel 2.4s ease-in-out infinite; }
+  ::-webkit-scrollbar { width:5px } ::-webkit-scrollbar-thumb { background:#1e2d40; border-radius:4px }
+</style>
+</head>
+<body class="flex h-screen">
+  <!-- SIDEBAR -->
+  <aside id="sidebar" class="w-56 shrink-0 bg-[#0f1722] border-r border-[#1e2d40] flex flex-col">
+    <div class="h-14 flex items-center gap-2.5 px-4 border-b border-[#1e2d40]">
+      <div class="w-7 h-7 rounded-md bg-emerald-900/50 flex items-center justify-center border border-emerald-500/40 text-sm">🍇</div>
+      <div>
+        <div class="font-bold text-[12px] tracking-wide">APOLLO AGRIVERSE</div>
+        <div class="text-[8px] text-slate-400 uppercase tracking-widest">Digital Twin System</div>
+      </div>
+    </div>
+    <nav class="flex-1 overflow-y-auto py-3 px-2 space-y-0.5" id="nav"></nav>
+    <div class="p-4 border-t border-[#1e2d40] flex flex-col items-center">
+      <div class="w-full text-left mb-2">
+        <span class="text-[9px] text-slate-500 uppercase tracking-widest font-bold">Farm Status</span>
+        <div class="flex items-center gap-1.5 mt-0.5"><span class="text-emerald-400 text-xs font-bold">♥ Healthy</span></div>
+      </div>
+      <div class="relative w-20 h-20 flex items-center justify-center">
+        <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="34" stroke="#1e2d40" stroke-width="8" fill="none"/>
+          <circle cx="50" cy="50" r="34" stroke="#10b981" stroke-width="8" fill="none"
+            stroke-dasharray="213.6" stroke-dashoffset="27.8" stroke-linecap="round"/>
+        </svg>
+        <span class="absolute text-lg font-bold">87%</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <header class="h-12 shrink-0 bg-[#0f1722] border-b border-[#1e2d40] flex items-center justify-between px-3">
+      <div class="flex items-center gap-2">
+        <button onclick="toggleSidebar()" class="rounded-lg border border-[#1e2d40] bg-[#16202d] px-2.5 py-1 text-[10px] font-bold uppercase text-slate-300">Hide panels</button>
+        <button onclick="toggleRight()" class="rounded-lg border border-[#1e2d40] bg-[#16202d] px-2.5 py-1 text-[10px] font-bold uppercase text-slate-300">Hide summary</button>
+        <span class="text-[11px] text-slate-400 ml-2" id="levelLabel">1. DIGITAL TWIN – FARM OVERVIEW</span>
+      </div>
+      <div class="flex items-center gap-4 text-xs">
+        <span>🌧 28°C</span><span>💧 65% Hum</span><span class="text-slate-400">📅 20 May 2025</span>
+      </div>
+    </header>
+
+    <div class="flex-1 flex min-h-0 overflow-hidden">
+      <!-- CENTER -->
+      <div class="flex-1 flex flex-col min-w-0 min-h-0">
+        <!-- Level toolbar -->
+        <div class="shrink-0 flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[#1e2d40] bg-[#0f1722]">
+          <div class="text-[11px] text-slate-400" id="breadcrumb">Farm Overview</div>
+          <div class="flex items-center gap-1.5">
+            <button onclick="setLevel('farm')" id="btn-farm" class="lvl-btn flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/50">🗺 Farm View</button>
+            <button onclick="setLevel('field')" id="btn-field" class="lvl-btn flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold bg-[#16202d] text-slate-400">📐 Field View</button>
+            <button onclick="setLevel('plant')" id="btn-plant" class="lvl-btn flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold bg-[#16202d] text-slate-400">🌿 Plant View</button>
+            <button onclick="setLevel('soil')" id="btn-soil" class="lvl-btn flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold bg-[#16202d] text-slate-400">🧪 Soil View</button>
+          </div>
+        </div>
+
+        <div class="flex-1 flex min-h-0">
+          <div class="flex-1 relative min-w-0 p-3" id="viz"></div>
+          <!-- Context panel -->
+          <div class="w-64 shrink-0 border-l border-[#1e2d40] bg-[#0f1722] p-4 overflow-y-auto" id="ctx"></div>
+        </div>
+
+        <!-- Bottom sim strip -->
+        <div class="shrink-0 border-t border-[#1e2d40] bg-[#0f1722] px-4 py-2.5 flex items-center gap-4 flex-wrap">
+          <div class="flex items-center gap-2">
+            <span class="text-[10px] text-slate-500 uppercase">Simulation</span>
+            <button id="modeAuto" onclick="setMode('auto')" class="text-[11px] px-2.5 py-1 rounded-md font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Auto Grow</button>
+            <button id="modeManual" onclick="setMode('manual')" class="text-[11px] px-2.5 py-1 rounded-md font-semibold text-slate-400 border border-transparent">Manual</button>
+          </div>
+          <button onclick="togglePlay()" id="playBtn" class="flex items-center gap-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/40 px-3 py-1.5 text-[11px] font-bold text-emerald-300">▶ Play</button>
+          <div class="flex-1 min-w-[140px]">
+            <div class="flex justify-between text-[10px] text-slate-400 mb-0.5">
+              <span id="dayLabel">Day 0 / 150</span>
+              <span class="text-emerald-400" id="stageLabel">🌱 Germination</span>
+            </div>
+            <input type="range" min="0" max="150" value="0" id="daySlider" class="w-full h-1.5 accent-emerald-500" oninput="setDay(+this.value)" />
+          </div>
+          <div class="flex items-center gap-3 text-[11px] text-slate-400">
+            <span>🌡 <span id="tempV">28</span>°C</span>
+            <span>💧 <span id="moistV">62</span>%</span>
+            <span>♥ Health <span id="healthV">87</span>%</span>
+            <span>🍇 <span id="yieldV">0.00</span> t/ac</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN -->
+      <div id="rightCol" class="w-[290px] shrink-0 border-l border-[#1e2d40] bg-[#0b131e] overflow-y-auto p-3 flex flex-col gap-3">
+        <div class="bg-[#16202d] rounded-xl border border-[#1e2d40] p-4">
+          <h3 class="text-white text-xs font-bold tracking-wide mb-3 uppercase">Farm Summary</h3>
+          <div class="space-y-2.5 text-[11px]" id="farmSummaryRows"></div>
+          <button class="w-full mt-3 py-2 bg-[#0f1722] rounded border border-[#1e2d40] text-slate-300 text-xs">View Full Summary</button>
+        </div>
+        <div class="bg-[#16202d] rounded-xl border border-[#1e2d40] p-4">
+          <h3 class="text-white text-xs font-bold tracking-wide mb-3 uppercase">Weather Summary</h3>
+          <div class="flex justify-between items-center mb-4">
+            <div class="flex items-center gap-2">
+              <span class="text-3xl">☀️</span>
+              <div><div class="text-2xl font-light">28°C</div><div class="text-[10px] text-slate-400">Partly Cloudy</div></div>
+            </div>
+            <div class="text-[10px] text-slate-400 text-right"><div>Min <b class="text-white">21°C</b></div><div>Max <b class="text-white">31°C</b></div></div>
+          </div>
+          <div class="grid grid-cols-3 gap-1.5 mb-3">
+            <div class="bg-[#0f1722] p-2 rounded text-center border border-[#1e2d40]"><div class="text-[9px] text-blue-400">Rain 24h</div><span class="text-xs">12 mm</span></div>
+            <div class="bg-[#0f1722] p-2 rounded text-center border border-[#1e2d40]"><div class="text-[9px] text-cyan-400">Humidity</div><span class="text-xs">65%</span></div>
+            <div class="bg-[#0f1722] p-2 rounded text-center border border-[#1e2d40]"><div class="text-[9px] text-slate-300">Wind</div><span class="text-xs">18 km/h</span></div>
+          </div>
+          <div class="border-t border-[#1e2d40] pt-3">
+            <div class="text-[10px] text-slate-400 mb-2">Rainfall Forecast (7 Days)</div>
+            <div class="flex justify-between items-end h-14">
+              <div class="flex flex-col items-center gap-0.5 w-6"><span class="text-[9px]">5</span><div class="w-full bg-blue-500 rounded-t" style="height:10px"></div><span class="text-[8px] text-slate-500">Tue</span></div>
+              <div class="flex flex-col items-center gap-0.5 w-6"><span class="text-[9px]">12</span><div class="w-full bg-blue-500 rounded-t" style="height:24px"></div><span class="text-[8px] text-slate-500">Wed</span></div>
+              <div class="flex flex-col items-center gap-0.5 w-6"><span class="text-[9px]">8</span><div class="w-full bg-blue-500 rounded-t" style="height:16px"></div><span class="text-[8px] text-slate-500">Thu</span></div>
+              <div class="flex flex-col items-center gap-0.5 w-6"><span class="text-[9px]">10</span><div class="w-full bg-blue-500 rounded-t" style="height:20px"></div><span class="text-[8px] text-slate-500">Fri</span></div>
+              <div class="flex flex-col items-center gap-0.5 w-6"><span class="text-[9px]">15</span><div class="w-full bg-blue-500 rounded-t" style="height:30px"></div><span class="text-[8px] text-slate-500">Sat</span></div>
+              <div class="flex flex-col items-center gap-0.5 w-6"><span class="text-[9px]">6</span><div class="w-full bg-blue-500 rounded-t" style="height:12px"></div><span class="text-[8px] text-slate-500">Sun</span></div>
+              <div class="flex flex-col items-center gap-0.5 w-6"><span class="text-[9px]">4</span><div class="w-full bg-blue-500 rounded-t" style="height:8px"></div><span class="text-[8px] text-slate-500">Mon</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="bg-[#16202d] rounded-xl border border-[#1e2d40] p-4">
+          <div class="flex justify-between mb-3"><h3 class="text-white text-xs font-bold uppercase">Recent Alerts</h3><span class="text-[10px] text-emerald-400">View All</span></div>
+          <div class="space-y-3 text-[11px]">
+            <div class="flex gap-2"><span class="text-rose-500">⚠</span><div><div class="text-white">High temperature expected</div><div class="text-slate-400 text-[10px]">Field B · 10 min ago</div></div></div>
+            <div class="flex gap-2"><span class="text-amber-500">⚠</span><div><div class="text-white">Low nitrogen in Zone B2</div><div class="text-slate-400 text-[10px]">Field B · 35 min ago</div></div></div>
+            <div class="flex gap-2"><span class="text-blue-400">⚠</span><div><div class="text-white">Rainfall expected in 18 hrs</div><div class="text-slate-400 text-[10px]">Farm · 1 hr ago</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const STAGES = [
+  {id:'germination',label:'Germination',start:0,end:15,emoji:'🌱'},
+  {id:'vegetative',label:'Vegetative Growth',start:15,end:45,emoji:'🌿'},
+  {id:'flowering',label:'Flowering',start:45,end:65,emoji:'🌼'},
+  {id:'fruit_set',label:'Fruit Set',start:65,end:80,emoji:'🍇'},
+  {id:'berry',label:'Berry Development',start:80,end:110,emoji:'🍇'},
+  {id:'ripening',label:'Ripening',start:110,end:140,emoji:'🍇'},
+  {id:'harvest',label:'Harvesting',start:140,end:150,emoji:'🧺'},
+];
+const FIELDS = [
+  {id:'A',name:'Field A',acres:2.3,health:89,x:18,y:28,w:28,h:22},
+  {id:'B',name:'Field B',acres:2.45,health:85,x:52,y:22,w:30,h:26},
+  {id:'C',name:'Field C',acres:2.15,health:82,x:22,y:58,w:26,h:24},
+  {id:'D',name:'Field D',acres:2.6,health:82,x:55,y:55,w:28,h:24},
+];
+const NAV = [
+  ['twin','🏠','Digital Twin','Farm Overview'],
+  ['weather','🌧','Weather Intelligence','Microclimate Data'],
+  ['soil','📐','Intelligent Soil','NPK & Moisture'],
+  ['lifecycle','🌿','Grape Lifecycle','Phenology'],
+  ['hydrogels','🧪','Intelligent Hydrogels','Polymer Dynamics'],
+  ['mulching','📦','Smart Mulching','Sensor Films'],
+  ['simulation','▶','Simulation','Scenario Analysis'],
+  ['predictions','🧠','Predictions','AI Forecasts'],
+  ['analytics','📊','Analytics','Farm Data'],
+  ['alerts','⚠','Alerts','Active Warnings'],
+  ['reports','📄','Reports','Generated Logs'],
+  ['settings','⚙','Settings','System Config'],
+];
+
+let day = 0, level = 'farm', playing = false, mode = 'auto', timer = null;
+
+function stageOf(d) {
+  return STAGES.find(s => d >= s.start && d < s.end) || STAGES[STAGES.length-1];
+}
+function metrics(d) {
+  const t = Math.min(1, d/150);
+  const height = Math.round(8 + t*140);
+  const berry = d >= 65 ? +((d-65)/85*14).toFixed(1) : 0;
+  const yield_ = +(4.8 * (d < 45 ? 0.15 : d < 80 ? 0.45 : d < 120 ? 0.85 : 1) * 0.87).toFixed(2);
+  return { height, berry, yield: yield_, health: 87 };
+}
+
+function renderNav() {
+  document.getElementById('nav').innerHTML = NAV.map(([id,icon,label,sub],i) => `
+    <button class="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-left ${i===0?'bg-emerald-900/25 border border-emerald-500/30':'border border-transparent'}">
+      <span class="text-sm">${icon}</span>
+      <div class="min-w-0">
+        <div class="text-[12px] ${i===0?'text-emerald-400 font-bold':'text-slate-300'}">${label}</div>
+        <div class="text-[9px] text-slate-500">${sub}</div>
+      </div>
+    </button>`).join('');
+}
+
+function renderFarmSummary() {
+  const m = metrics(day);
+  const rows = [
+    ['Total Area','9.50 Acres'],['Total Plants','4,320'],['Active Fields','4'],
+    ['Grape Variety','Thompson Seedless'],['Average Soil Moisture','62%'],
+    ['Crop Health Index', m.health+'%'],['Water Availability','Good'],
+    ['Next Irrigation','Not Required'],['Rainfall Forecast (3 Days)','18 mm'],
+  ];
+  document.getElementById('farmSummaryRows').innerHTML = rows.map(([l,v],i) =>
+    `<div class="flex justify-between ${i<rows.length-1?'border-b border-[#1e2d40] pb-1.5':''}">
+      <span class="text-slate-400">${l}</span>
+      <span class="${v==='Good'||v==='Not Required'?'text-emerald-400 font-medium':'text-white'}">${v}</span>
+    </div>`).join('');
+}
+
+window.setLevel = function setLevel(l) {
+  level = l;
+  document.querySelectorAll('.lvl-btn').forEach(b => {
+    b.className = 'lvl-btn flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold bg-[#16202d] text-slate-400';
+  });
+  const btn = document.getElementById('btn-'+l);
+  if (btn) btn.className = 'lvl-btn flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/50';
+  const labels = {farm:'FARM OVERVIEW',field:'FIELD VIEW',plant:'PLANT VIEW',soil:'SOIL & HYDROGELS'};
+  document.getElementById('levelLabel').textContent = '1. DIGITAL TWIN – ' + labels[l];
+  const crumbs = {farm:'Farm Overview',field:'Farm Overview › Field B',plant:'Farm Overview › Field B › Plant View',soil:'Farm Overview › Field B › Plant View › Soil & Hydrogels'};
+  document.getElementById('breadcrumb').textContent = crumbs[l];
+  renderViz();
+  renderCtx();
+}
+
+function renderViz() {
+  const el = document.getElementById('viz');
+  const m = metrics(day);
+  const st = stageOf(day);
+
+  if (level === 'farm') {
+    el.innerHTML = `<div class="relative w-full h-full overflow-hidden rounded-xl" style="background:linear-gradient(180deg,#1a3a2a 0%,#0d2818 40%,#0a1a12 100%)">
+      <div class="absolute left-[8%] top-[40%] w-[12%] h-[45%] rounded-full bg-sky-700/40 blur-[1px] rotate-12"></div>
+      ${FIELDS.map(f => `
+        <button onclick="setLevel('field')" class="absolute rounded-lg border-2 border-emerald-400/70 field-glow bg-emerald-900/30 hover:bg-emerald-800/40 transition cursor-pointer"
+          style="left:${f.x}%;top:${f.y}%;width:${f.w}%;height:${f.h}%">
+          <div class="absolute inset-1 flex flex-col gap-0.5 opacity-60 overflow-hidden">
+            ${[...Array(8)].map(()=>'<div class="flex-1 bg-gradient-to-r from-green-600/40 to-green-500/30 rounded-sm"></div>').join('')}
+          </div>
+          <div class="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap bg-[#0f1722]/95 border border-emerald-500/40 rounded-lg px-2.5 py-1 shadow-lg">
+            <div class="text-[11px] font-bold text-white">${f.name}</div>
+            <div class="text-[9px] text-slate-300">${f.acres} Acres</div>
+            <div class="text-[10px] text-emerald-400 font-semibold">Health ${f.health}%</div>
+          </div>
+        </button>`).join('')}
+      <div class="absolute bottom-3 left-3 bg-black/50 rounded-lg px-3 py-2 text-[10px] text-slate-300">Click a field to zoom · Farm health ${m.health}%</div>
+    </div>`;
+  } else if (level === 'field') {
+    let cells = '';
+    for (let i=0;i<140;i++) {
+      const age = day + (i%7) - 3;
+      const h = Math.min(100, Math.max(8, age*0.7));
+      const fruit = age>=65, flower = age>=45&&age<65, leaf=age>=15;
+      cells += `<div class="relative flex flex-col items-center justify-end">
+        <div class="w-1 bg-[#6b4423] rounded-t" style="height:${h*0.35}%"></div>
+        ${leaf?`<div class="w-3 h-3 rounded-full bg-green-500/80 -mt-1" style="transform:scale(${0.5+h/120})"></div>`:''}
+        ${flower?'<div class="w-1.5 h-1.5 rounded-full bg-yellow-200 -mt-0.5"></div>':''}
+        ${fruit?`<div class="w-2 h-2.5 rounded-full -mt-0.5" style="background:${age>=110?'#7c3aed':'#16a34a'}"></div>`:''}
+        <div class="w-full h-0.5 bg-[#4a3728]/60"></div>
+      </div>`;
+    }
+    el.innerHTML = `<div class="relative w-full h-full overflow-hidden rounded-xl bg-gradient-to-b from-sky-900/30 via-[#1a3a2a] to-[#0d2818]">
+      <div class="absolute top-3 left-1/2 -translate-x-1/2 bg-emerald-900/80 border border-emerald-500/40 rounded-full px-4 py-1.5 text-xs font-bold text-emerald-300">Field B · 2.45 Acres · Health 85%</div>
+      <div class="absolute inset-8 top-12 grid gap-1" style="grid-template-columns:repeat(14,1fr);grid-template-rows:repeat(10,1fr)">${cells}</div>
+      <div class="absolute bottom-3 right-3 text-[10px] text-slate-400 font-mono">Stage: ${st.label}</div>
+    </div>`;
+  } else if (level === 'plant') {
+    const scale = Math.min(1.15, 0.35 + m.height/160);
+    const showSeed = day < 15, showStem = day >= 8, showLeaves = day >= 15;
+    const showFlowers = day >= 45 && day < 65, showGrapes = day >= 65, purple = day >= 110;
+    let leaves = '', flowers = '', grapes = '';
+    if (showLeaves) {
+      for (let i=0;i<(day<30?6:day<50?10:14);i++) {
+        const angle = (i/12)*Math.PI*2+(i%2)*0.3, r=28+(i%4)*12;
+        const x=Math.cos(angle)*r, y=Math.sin(angle)*r*0.55-20, size=22+(i%3)*8;
+        leaves += `<div class="absolute rounded-[40%_60%_50%_50%] bg-gradient-to-br from-emerald-400 to-green-700 border border-emerald-300/20 shadow-md"
+          style="width:${size}px;height:${size*1.2}px;left:${80+x}px;top:${50+y}px;transform:rotate(${angle*40}deg)"></div>`;
+      }
+    }
+    if (showFlowers) {
+      for (let i=0;i<5;i++) {
+        flowers += `<div class="relative w-4 h-4">`;
+        for (const deg of [0,72,144,216,288]) {
+          flowers += `<div class="absolute w-2.5 h-2.5 rounded-full bg-gradient-to-br from-yellow-100 to-amber-200"
+            style="left:${6+Math.cos(deg*Math.PI/180)*6}px;top:${6+Math.sin(deg*Math.PI/180)*6}px"></div>`;
+        }
+        flowers += `<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-amber-500"></div></div>`;
+      }
+    }
+    if (showGrapes) {
+      for (let c=0;c<3;c++) {
+        grapes += `<div class="relative" style="width:28px;height:${40+m.berry}px">`;
+        for (let g=0;g<Math.min(18,6+Math.floor(m.berry));g++) {
+          const t=g/18,row=Math.floor(g/4),col=g%4;
+          grapes += `<div class="absolute rounded-full shadow-sm" style="width:${7+(1-t)*3}px;height:${7+(1-t)*3}px;left:${4+col*5+(row%2)*2}px;top:${row*7}px;
+            background:${purple?'radial-gradient(circle at 30% 30%,#a78bfa,#5b21b6)':'radial-gradient(circle at 30% 30%,#4ade80,#166534)'}"></div>`;
+        }
+        grapes += `</div>`;
+      }
+    }
+    el.innerHTML = `<div class="w-full h-full rounded-xl bg-gradient-to-b from-[#1a2a1a] to-[#0d1510] border border-[#1e2d40] overflow-hidden relative flex flex-col items-center justify-end">
+      <div class="absolute bottom-6 left-1/2 -translate-x-1/2 w-48 h-10 rounded-[100%] bg-gradient-to-b from-[#5c4030] to-[#3d2b1f] opacity-90"></div>
+      <div class="relative mb-10" style="transform:scale(${scale});transform-origin:bottom center">
+        ${showSeed?`<div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-gradient-to-br from-amber-700 to-amber-900 border border-amber-600/50 shadow-lg z-20" style="transform:scale(${0.8+Math.min(day,14)*0.03})"></div>`:''}
+        ${showStem?`<div class="mx-auto rounded-full bg-gradient-to-r from-[#6b4423] via-[#8b5a2b] to-[#6b4423]" style="width:${day<30?6:day<60?10:14}px;height:${Math.max(20,m.height*0.9)}px"></div>`:''}
+        ${showLeaves?`<div class="absolute left-1/2 -translate-x-1/2 bottom-[40%] pointer-events-none" style="width:160px;height:140px">${leaves}</div>`:''}
+        ${showFlowers?`<div class="absolute left-1/2 -translate-x-1/2 bottom-[55%] flex gap-3">${flowers}</div>`:''}
+        ${showGrapes?`<div class="absolute left-1/2 -translate-x-1/2 bottom-[25%] flex gap-4">${grapes}</div>`:''}
+      </div>
+      <div class="absolute bottom-2 text-[10px] text-slate-400 font-mono">Day ${day} · ${st.label}</div>
+    </div>`;
+  } else {
+    // soil
+    let gels = '';
+    for (let i=0;i<14;i++) {
+      const x=12+(i%7)*12+(i>6?6:0), y=45+Math.floor(i/7)*22+(i%3)*4, s=0.7+0.5+(i%3)*0.1;
+      gels += `<div class="absolute rounded-full gel-pulse" style="left:${x}%;top:${y}%;width:${14*s}px;height:${14*s}px;
+        background:radial-gradient(circle at 35% 35%,rgba(96,165,250,0.95),rgba(37,99,235,0.75));
+        box-shadow:0 0 10px rgba(59,130,246,0.55);animation-delay:${i*0.15}s"></div>`;
+    }
+    el.innerHTML = `<div class="relative w-full h-full flex items-center justify-center p-4">
+      <div class="relative w-full max-w-lg h-72 rounded-xl overflow-hidden border border-[#1e2d40] shadow-2xl">
+        <div class="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-green-600 to-green-800"></div>
+        <div class="absolute top-6 left-0 right-0 h-3 bg-[#5c4030]"></div>
+        <div class="absolute top-8 left-0 right-0 bottom-0 bg-gradient-to-b from-[#8B6914] via-[#6B4423] to-[#3d2914]"></div>
+        ${['0 cm','15 cm','30 cm','45 cm','60 cm'].map((d,i)=>`<div class="absolute left-2 text-[9px] text-white/50 font-mono" style="top:${12+i*48}px">${d}</div>`).join('')}
+        <svg class="absolute inset-0 w-full h-full opacity-80" viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path d="M50 8 Q48 25 40 40 Q35 55 30 70" stroke="#c4a574" stroke-width="1.2" fill="none"/>
+          <path d="M50 8 Q52 28 60 42 Q65 58 70 72" stroke="#c4a574" stroke-width="1.2" fill="none"/>
+          <path d="M50 8 Q45 30 42 50 Q38 65 35 80" stroke="#a08050" stroke-width="0.9" fill="none"/>
+          <path d="M50 8 Q55 32 58 52 Q62 68 68 82" stroke="#a08050" stroke-width="0.9" fill="none"/>
+        </svg>
+        ${gels}
+        <div class="absolute bottom-3 right-3 bg-black/50 rounded px-2 py-1 text-[10px] text-cyan-300 font-mono">Moisture 62% · Gel 78%</div>
+      </div>
+    </div>`;
+  }
+}
+
+function renderCtx() {
+  const m = metrics(day);
+  const st = stageOf(day);
+  let html = '';
+  if (level==='farm') {
+    html = `<h3 class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Farm Summary</h3>
+      <div class="space-y-2 text-[11px]">
+        ${[['Total Area','9.50 Acres'],['Total Plants','4,320'],['Active Fields','4'],['Grape Variety','Thompson Seedless'],['Avg. Soil Moisture','62%'],['Crop Health Index',m.health+'%'],['Next Irrigation','Not Required'],['Rainfall (3 Days)','18 mm']].map(([l,v])=>
+          `<div class="flex justify-between border-b border-[#1e2d40]/60 pb-1.5"><span class="text-slate-400">${l}</span><span class="${v==='Not Required'?'text-emerald-400':'text-white'}">${v}</span></div>`).join('')}
+      </div>
+      <button onclick="setLevel('field')" class="w-full mt-4 text-left text-[11px] rounded-lg px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">Go to Field View</button>`;
+  } else if (level==='field') {
+    html = `<h3 class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Field Summary</h3>
+      <div class="space-y-2 text-[11px]">
+        ${[['Grape Variety','Thompson Seedless'],['Plant Population','1,200'],['Row Spacing','3.0 m'],['Plant Spacing','1.5 m'],['Soil Type','Loamy Sand'],['Soil Moisture','62%'],['Estimated Yield',m.yield+' tons/acre']].map(([l,v])=>
+          `<div class="flex justify-between border-b border-[#1e2d40]/60 pb-1.5"><span class="text-slate-400">${l}</span><span class="text-white">${v}</span></div>`).join('')}
+      </div>
+      <button onclick="setLevel('plant')" class="w-full mt-3 text-left text-[11px] rounded-lg px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">Go to Plant View</button>
+      <button onclick="setLevel('soil')" class="w-full mt-2 text-left text-[11px] rounded-lg px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">Go to Soil View</button>`;
+  } else if (level==='plant') {
+    const prog = Math.min(100, Math.round(((day - st.start)/(st.end-st.start))*100));
+    html = `<h3 class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Plant Details</h3>
+      <div class="space-y-2 text-[11px]">
+        ${[['Variety','Thompson Seedless'],['Plant Age',day+' Days'],['Growth Stage',st.label],['Canopy Spread',(0.2+day/150*1.5).toFixed(2)+' m'],['Plant Height',m.height+' cm'],['Health Index',m.health+'%'],['Stress Level','Low']].map(([l,v])=>
+          `<div class="flex justify-between border-b border-[#1e2d40]/60 pb-1.5"><span class="text-slate-400">${l}</span><span class="text-white">${v}</span></div>`).join('')}
+        <div class="pt-2"><div class="text-[10px] text-slate-500 mb-1">Stage Progress</div>
+          <div class="h-2 rounded-full bg-[#1e2d40] overflow-hidden"><div class="h-full bg-emerald-500 rounded-full" style="width:${prog}%"></div></div>
+          <div class="text-[10px] text-emerald-400 mt-1">${prog}% · ${st.label}</div>
+        </div>
+      </div>
+      <button onclick="setLevel('soil')" class="w-full mt-4 text-left text-[11px] rounded-lg px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">Go to Soil View</button>`;
+  } else {
+    html = `<h3 class="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-2">Soil Metrics</h3>
+      <div class="space-y-2 text-[11px]">
+        ${[['Soil Type','Loamy Sand'],['Soil Moisture','62%'],['Temperature','28°C'],['pH Level','6.5'],['EC','1.2 dS/m'],['Organic Matter','2.8%']].map(([l,v])=>
+          `<div class="flex justify-between border-b border-[#1e2d40]/60 pb-1.5"><span class="text-slate-400">${l}</span><span class="text-white">${v}</span></div>`).join('')}
+        <div class="pt-2 border-t border-[#1e2d40]"><div class="text-[10px] text-slate-500 mb-2">Hydrogel Status</div>
+          ${[['Saturation Level','78%'],['Water Holding Capacity','High'],['Efficiency','73%']].map(([l,v])=>
+            `<div class="flex justify-between border-b border-[#1e2d40]/60 pb-1.5"><span class="text-slate-400">${l}</span><span class="text-white">${v}</span></div>`).join('')}
+        </div>
+      </div>`;
+  }
+  document.getElementById('ctx').innerHTML = html;
+}
+
+window.setDay = function setDay(d) {
+  day = d;
+  const st = stageOf(day);
+  const m = metrics(day);
+  document.getElementById('dayLabel').textContent = `Day ${day} / 150`;
+  document.getElementById('stageLabel').textContent = `${st.emoji} ${st.label}`;
+  document.getElementById('daySlider').value = day;
+  document.getElementById('healthV').textContent = m.health;
+  document.getElementById('yieldV').textContent = m.yield.toFixed(2);
+  document.getElementById('moistV').textContent = 62;
+  renderViz();
+  renderCtx();
+  renderFarmSummary();
+}
+
+window.togglePlay = function togglePlay() {
+  playing = !playing;
+  document.getElementById('playBtn').textContent = playing ? '⏸ Pause' : '▶ Play';
+  if (playing) {
+    timer = setInterval(() => {
+      if (day >= 150) { togglePlay(); return; }
+      setDay(day + 1);
+    }, 400);
+  } else clearInterval(timer);
+}
+
+window.setMode = function setMode(m) {
+  mode = m;
+  document.getElementById('modeAuto').className = m==='auto'
+    ? 'text-[11px] px-2.5 py-1 rounded-md font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+    : 'text-[11px] px-2.5 py-1 rounded-md font-semibold text-slate-400 border border-transparent';
+  document.getElementById('modeManual').className = m==='manual'
+    ? 'text-[11px] px-2.5 py-1 rounded-md font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40'
+    : 'text-[11px] px-2.5 py-1 rounded-md font-semibold text-slate-400 border border-transparent';
+}
+
+window.toggleSidebar = function toggleSidebar() {
+  const s = document.getElementById('sidebar');
+  s.style.display = s.style.display === 'none' ? 'flex' : 'none';
+}
+window.toggleRight = function toggleRight() {
+  const r = document.getElementById('rightCol');
+  r.style.display = r.style.display === 'none' ? 'flex' : 'none';
+}
+
+renderNav();
+renderFarmSummary();
+setLevel('farm');
+setDay(0);
+</script>
+</body>
+</html>
