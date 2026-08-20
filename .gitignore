@@ -41,17 +41,16 @@ temp/*
 .DS_Store
 Thumbs.db
 Desktop.ini
-# Ignore raw dataset files
-02_Datasets/
+# Ignore everything inside 02_Datasets by default
+02_Datasets/*
 
-# Whitelist the KnowledgeBase folder for suitability CSVs
+# Whitelist specific subfolders
 !02_Datasets/KnowledgeBase/
+!02_Datasets/KnowledgeBase/*.csv
 
-# Allow tracking of generators, master notebooks, and processed grape datasets
 !02_Datasets/Synthetic/generators/
 !02_Datasets/Synthetic/generators/*.py
 !02_Datasets/Master/
 !02_Datasets/Master/*.ipynb
 !02_Datasets/Processed/Grapes/
 !02_Datasets/Processed/Grapes/*.csv
->>>>>>> ca1065c (feat: updated synthetic generators, validations, and master notebook for grape pivot)
