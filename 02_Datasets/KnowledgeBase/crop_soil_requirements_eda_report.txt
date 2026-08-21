@@ -1,0 +1,107 @@
+APOLLO AGRIVERSE — CROP-SOIL REQUIREMENTS EDA REPORT
+============================================================
+Total records: 25
+Total features: 20
+
+SOIL TYPE DISTRIBUTION
+------------------------------------------------------------
+Black Cotton Soil: 5
+Alluvial Soil: 5
+Red Loam Soil: 5
+Lateritic Soil: 5
+Saline-Alkaline Soil: 5
+
+PREFERRED TEXTURE DISTRIBUTION
+------------------------------------------------------------
+Clay: 5
+Silt Loam: 5
+Sandy Loam: 5
+Clay Loam: 5
+Silty Clay: 5
+
+CROP DISTRIBUTION
+------------------------------------------------------------
+grape: 25
+
+VARIETY DISTRIBUTION
+------------------------------------------------------------
+grape_thompson: 5
+grape_tas_a_ganesh: 5
+grape_sharad: 5
+grape_manjari_naveen: 5
+grape_manjari_shyama: 5
+
+NUMERIC FEATURE STATISTICS
+------------------------------------------------------------
+
+ph_min
+  Min    : 5.80
+  Max    : 6.50
+  Mean   : 6.26
+  Median : 6.50
+
+ph_max
+  Min    : 7.00
+  Max    : 8.00
+  Mean   : 7.70
+  Median : 8.00
+
+ec_max_ds_m
+  Min    : 1.00
+  Max    : 1.50
+  Mean   : 1.34
+  Median : 1.50
+
+minimum_soil_moisture_pct
+  Min    : 15.00
+  Max    : 18.00
+  Mean   : 16.20
+  Median : 16.00
+
+maximum_soil_moisture_pct
+  Min    : 28.00
+  Max    : 32.00
+  Mean   : 29.20
+  Median : 28.00
+
+nitrogen_min_mg_kg
+  Min    : 145.00
+  Max    : 170.00
+  Mean   : 155.40
+  Median : 150.00
+
+phosphorus_min_mg_kg
+  Min    : 20.00
+  Max    : 25.00
+  Mean   : 22.00
+  Median : 20.00
+
+potassium_min_mg_kg
+  Min    : 250.00
+  Max    : 280.00
+  Mean   : 261.20
+  Median : 260.00
+
+organic_matter_min_pct
+  Min    : 0.80
+  Max    : 1.00
+  Mean   : 0.92
+  Median : 1.00
+
+soil_suitability_score
+  Min    : 47.00
+  Max    : 94.00
+  Mean   : 76.60
+  Median : 84.00
+
+yield_potential_score
+  Min    : 44.00
+  Max    : 93.00
+  Mean   : 74.44
+  Median : 82.00
+
+compatibility_score
+  Min    : 0.47
+  Max    : 0.94
+  Mean   : 0.77
+  Median : 0.84

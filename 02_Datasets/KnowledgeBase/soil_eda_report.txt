@@ -1,0 +1,209 @@
+APOLLO AGRIVERSE — SOIL DATA EDA REPORT
+============================================================
+Total records: 5000
+Total features: 36
+
+SOIL TYPE DISTRIBUTION
+------------------------------------------------------------
+Red Soil: 1033
+Black Soil: 1014
+Saline-Alkaline Soil: 999
+Lateritic Soil: 985
+Alluvial Soil: 969
+
+SOIL TEXTURE DISTRIBUTION
+------------------------------------------------------------
+Clay Loam: 1564
+Loam: 1274
+Sandy Loam: 863
+Clay: 493
+Silty Clay: 485
+Silt Loam: 321
+
+NUMERIC FEATURE STATISTICS
+------------------------------------------------------------
+soil_depth_cm
+  Min    : 30.000
+  Max    : 179.300
+  Mean   : 93.662
+  Median : 89.800
+
+bulk_density_g_cm3
+  Min    : 1.150
+  Max    : 1.650
+  Mean   : 1.405
+  Median : 1.400
+
+sand_pct
+  Min    : 9.940
+  Max    : 72.790
+  Mean   : 37.033
+  Median : 35.895
+
+silt_pct
+  Min    : 14.660
+  Max    : 58.780
+  Mean   : 31.184
+  Median : 29.925
+
+clay_pct
+  Min    : 9.490
+  Max    : 59.350
+  Mean   : 31.783
+  Median : 31.205
+
+porosity_pct
+  Min    : 37.740
+  Max    : 56.600
+  Mean   : 46.966
+  Median : 47.170
+
+water_holding_capacity_pct
+  Min    : 5.000
+  Max    : 29.780
+  Mean   : 14.828
+  Median : 14.495
+
+field_capacity_pct
+  Min    : 10.030
+  Max    : 45.000
+  Mean   : 29.903
+  Median : 31.015
+
+wilting_point_pct
+  Min    : 4.020
+  Max    : 24.990
+  Mean   : 15.115
+  Median : 15.510
+
+infiltration_rate_mm_hr
+  Min    : 5.000
+  Max    : 69.970
+  Mean   : 22.791
+  Median : 17.030
+
+ph
+  Min    : 4.800
+  Max    : 9.200
+  Mean   : 7.045
+  Median : 7.070
+
+electrical_conductivity_ds_m
+  Min    : 0.100
+  Max    : 5.490
+  Mean   : 1.289
+  Median : 0.730
+
+organic_matter_pct
+  Min    : 0.300
+  Max    : 1.800
+  Mean   : 0.981
+  Median : 0.950
+
+organic_carbon_pct
+  Min    : 0.170
+  Max    : 1.040
+  Mean   : 0.569
+  Median : 0.550
+
+cation_exchange_capacity_cmol_kg
+  Min    : 8.000
+  Max    : 64.980
+  Mean   : 28.708
+  Median : 24.925
+
+calcium_mg_kg
+  Min    : 403.600
+  Max    : 5982.900
+  Mean   : 2482.346
+  Median : 2159.300
+
+magnesium_mg_kg
+  Min    : 100.800
+  Max    : 1499.000
+  Mean   : 649.750
+  Median : 593.500
+
+sodium_mg_kg
+  Min    : 20.100
+  Max    : 1999.400
+  Mean   : 392.483
+  Median : 180.700
+
+nitrogen_mg_kg
+  Min    : 70.000
+  Max    : 349.900
+  Mean   : 182.139
+  Median : 173.300
+
+phosphorus_mg_kg
+  Min    : 5.000
+  Max    : 45.000
+  Mean   : 20.943
+  Median : 19.900
+
+potassium_mg_kg
+  Min    : 80.200
+  Max    : 599.800
+  Mean   : 275.861
+  Median : 255.600
+
+sulfur_mg_kg
+  Min    : 5.000
+  Max    : 30.000
+  Mean   : 15.922
+  Median : 15.300
+
+iron_mg_kg
+  Min    : 15.000
+  Max    : 149.700
+  Mean   : 53.939
+  Median : 44.700
+
+zinc_mg_kg
+  Min    : 0.200
+  Max    : 2.500
+  Mean   : 1.011
+  Median : 0.940
+
+copper_mg_kg
+  Min    : 0.200
+  Max    : 2.000
+  Mean   : 0.873
+  Median : 0.860
+
+manganese_mg_kg
+  Min    : 5.000
+  Max    : 90.000
+  Mean   : 33.790
+  Median : 30.550
+
+boron_mg_kg
+  Min    : 0.100
+  Max    : 1.500
+  Mean   : 0.609
+  Median : 0.570
+
+soil_moisture_pct
+  Min    : 5.050
+  Max    : 45.000
+  Mean   : 24.792
+  Median : 24.570
+
+soil_temperature_c
+  Min    : 22.010
+  Max    : 34.980
+  Mean   : 28.068
+  Median : 28.030
+
+microbial_activity_score
+  Min    : 10.100
+  Max    : 94.980
+  Mean   : 58.725
+  Median : 58.860
+
+soil_health_score
+  Min    : 35.000
+  Max    : 99.000
+  Mean   : 80.013
+  Median : 85.000
