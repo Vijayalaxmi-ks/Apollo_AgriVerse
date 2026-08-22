@@ -1,94 +1,111 @@
-# 🍇 Apollo AgriVerse: Phase 1 (Digital Twin)
+# 🍇 Apollo AgriVerse: AgriIntel Division (Phase 1 Grape Digital Twin)
 
-Welcome to the **Apollo AgriVerse** project! Developed by our dedicated team. This repository represents Phase 1 of our intelligent agricultural digital twin platform.
+>
+## 👥 Meet the AgriIntel Team
+
+This technical integration and engineering effort was conducted by:
+
+* **Vijayalaxmi K. Sundalam** - Technical Integration
+* **Nandini N. Naral** - Product, Data Quality & Mining
+* **Sunaina S. Gaikwad** - ML Baseline & Model Evaluation
+* **Dakshini A. Neel** - Data & ML-Model Frontend
+
+**Supervisor:** Akash Shivdas Chatake  
+**Organization:** Chatake Innoworks Pvt. Ltd.
+
+---
+*Built with ❤️ to engineer an intelligent agricultural ecosystem.*
+
+
+**Engineering Principle:** *"Agriculture should not merely be monitored it should be understood, anticipated, and empowered through intelligence."*
+
+Welcome to the **Apollo AgriVerse** project, developed under **Chatake Innoworks Pvt. Ltd.**. This repository contains the mid-term engineering state for the **AgriIntel Division**, focusing on an explainable crop and field-intelligence vertical slice for Grape Farming in India.
 
 ---
 
 ## 📖 Project Overview
 
-Apollo AgriVerse simulates real-world agricultural conditions by combining foundational crop data with live weather tracking. Initially focusing on grape farming (including high-value varieties like *Thompson Seedless* and *Manjari Naveen*), our system analyzes soil parameters, critical moisture levels, and climatic data to predict crop yields and provide smart agronomic triggers.
+Agricultural systems are inherently dynamic. Soil moisture changes, nutrient availability shifts, and environmental stress alters crop trajectories before conventional dashboards even report a problem. 
+
+To solve this, Apollo AgriVerse acts as a true **Digital Twin**. Instead of just showing raw sensor values, the architecture represents the farm as an evolving state. The project is built around **One Reviewable Decision Loop**: agricultural evidence is collected, represented as a system state, interpreted through Machine Learning (ML), and translated into an explainable decision.
 
 ---
 
-## ✨ Core Features & How It Works
+## ✨ Core Architecture & Features
 
-*   **🌱 Crop & Soil Datasets:** We engineered comprehensive tabular datasets for Indian soil types and crop varieties, storing critical parameters like temperature requirements and hydrogel dosages.
-*   **🌤️ NASA Weather API:** The backend integrates a live weather API from NASA to fetch crucial environmental data, seamlessly merging it with our crop requirements for real-time monitoring.
-*   **🧠 Machine Learning Models:** Using pre-trained models (e.g., `grape_yield_model.pkl`), the system processes telemetry and weather data to output accurate yield predictions.
-*   **📸 Crop Imagery:** We maintain a dedicated repository of crop images to visually support the digital twin interface and enhance data presentation.
+Our platform operates on a structured, four-layer architecture:
+
+### 1. 📊 Agricultural Evidence Layer
+We integrate real and synthetic tabular datasets covering soil types, weather conditions, farm metadata, sensor streams, and interventions (like hydrogel and mulching). 
+
+### 2. 🔄 Dynamic State Layer (The Digital Twin)
+The twin provides explicit memory of the system's condition. It utilizes mathematical state models to track:
+*   **Soil State:** Evolving moisture, thermal stress, and nutrient conditions.
+*   **Crop Lifecycle (GDD):** Tracking biological progress using cumulative Growing Degree Days (GDD) rather than just calendar days.
+*   **Interventions:** Simulating hydrogel capacity retention and mulch degradation over time.
+
+### 3. 🧠 Predictive Intelligence Layer (ML)
+Machine learning complements our explicit state models by handling complex, non-linear predictions[cite: 3]. 
+*   **Grape Yield Prediction:** Uses Random Forest regression to forecast harvest outcomes based on agronomy data[cite: 3].
+*   **Hydrogel & Telemetry Triggers:** Uses Gradient Boosting to predict hydrogel water storage capacity from digital-twin telemetry[cite: 3].
+
+### 4. 💻 Decision Layer (Explainable Frontend)
+A comprehensive 12-panel React/Streamlit dashboard prototype that binds to the backend API[cite: 3]. It translates complex state variables and ML predictions into reviewable, explainable recommendations for the farmer[cite: 3].
 
 ---
-
 ## 🚀 Getting Started
 
-To run this project locally, clone the repository and configure your environment:
+To test the backend state models and view the ML baseline:
 
 1. **Clone the repository** to your local machine.
-2. Ensure you have your **NASA Weather API key** configured in the `05_Backend/` environment variables.
-3. Execute the Python setup files in the `scripts/` directory to initialize the local databases.
-4. Start the backend server via **Uvicorn** and launch the frontend interface.
+2. Initialize the Python virtual environment: `python -m venv venv` and activate it.
+3. Install dependencies from the `05_Backend` directory using `pip install -r requirements.txt`.
+4. Run the state simulation scripts or launch the FastAPI server via **Uvicorn**.
+5. The SQLite database (`apollo_twin.db`) will track the simulated temporal state transitions[cite: 3].
 
 ---
 
 ## 🛠️ Technology Stack
 
-* **Backend API:** Python, FastAPI, Uvicorn
-* **Data Processing:** Pandas, NumPy
-* **Machine Learning:** Scikit-Learn
-* **Frontend:** HTML5, CSS3, JavaScript
+* **Core Language:** Python[cite: 3]
+* **Data Engineering:** Pandas, NumPy[cite: 3]
+* **Machine Learning:** Scikit-Learn[cite: 3]
+* **Backend API & Storage:** FastAPI, SQLite[cite: 3]
+* **Version Control:** Git / GitHub[cite: 3]
 
 ---
-
-## 👥 Meet the Team
-
-This project was built collaboratively by our core development team:
-
-* **Vijayalaxmi** - Frontend Dashboard, User Interface, and Integration
-* **Dakshini** - System Testing,ML Model Frontend, Quality Assurance, and Project Integration
-* **Nandini** - Backend Architecture, API Development, and Logic Engines (Suitability & Monitoring)
-* **Sunaina** - Data Engineering, Data Cleaning, Master Datasets, and Machine Learning Models
-
----
-*Built with ❤️ to empower farmers with smart technology. 🍇*
 
 
 ## 📁 Project Folder Structure
 
-Our workspace is highly modular to ensure clean separation between backend logic, frontend interfaces, data pipelines, and machine learning models.
+Our workspace separates data pipelines, backend logic, ML artifacts, and UI to ensure system maintainability[cite: 3].
 
 ```text
 Apollo_AgriVerse/
-├── 01_Documentation/           # Project proposals, reports, and API documentation
-├── 02_Datasets/                # All data files and databases
-│   ├── Interim/                # Temporary data states
-│   ├── KnowledgeBase/          # The core rules for our backend engines
-│   │   ├── Cleaned/
-│   │   │   ├── 01_crop_database_cleaned.csv
-│   │   │   └── 02_crop_variety_database_cleaned.csv
-│   │   ├── 03_soil_database_final.csv
-│   │   ├── 04_crop_soil_requirements_final.csv
-│   │   └── 05_region_climate_processed.csv
-│   ├── Master/                 # Flat datasets used to train the ML models
-│   ├── Metadata/               # Descriptions of what each column means
-│   ├── Processed/              # Finalized data
-│   ├── Raw/                    # Original, untouched source data
-│   └── Sample/                 # Small datasets for quick testing
-├── 03_Images/                  # UI assets, logos, and architecture diagrams
-├── 04_Frontend/                # Website files (HTML, CSS, JavaScript Dashboard)
-├── 05_Backend/                 # Our FastAPI application and Python logic engines
-├── 06_ML/                      # Pickled ML models (e.g., grape_yield_model.pkl)
-├── 07_Deployment/              # Files for hosting the website online
-├── 08_Testing/                 # Code to test if our API is working correctly
-├── 09_Project_Management/      # Roadmaps and task trackers
-├── 10_Presentations/           # Slides and presentation materials
-├── 11_Team/                    # Team notes and work logs
-├── logs/                       # Server error logs
-├── scripts/                    # Extra Python scripts for cleaning data
-├── temp/                       # Temporary cache files
-├── validation_plots/           # Graphs showing how accurate our ML models are
-├── apollo_twin.db              # Local SQLite database for the backend
+├── 01_Documentation/           # Technical reports, proposals, and API documentation[cite: 3]
+├── 02_Datasets/                # Tabular soil, weather, crop, farm, and synthetic data[cite: 3]
+│   ├── Interim/                
+│   ├── KnowledgeBase/          # Cleaned relational rulebooks (Crop, Variety, Soil, Climate)
+│   ├── Master/                 # ML-ready flattened datasets[cite: 3]
+│   ├── Metadata/               
+│   ├── Processed/              
+│   ├── Raw/                    
+│   └── Sample/                 
+├── 03_Images/                  # Visual evidence, dashboard panels, and diagrams[cite: 3]
+├── 04_Frontend/                # Dashboard interface prototypes[cite: 3]
+├── 05_Backend/                 # FastAPI application, Twin State Service, ML Inference Service[cite: 3]
+├── 06_ML/                      # Pickled models (e.g., Random Forest, Gradient Boosting)[cite: 3]
+├── 07_Deployment/              
+├── 08_Testing/                 
+├── 09_Project_Management/      
+├── 10_Presentations/           
+├── 11_Team/                    # Team notes and workflow logs[cite: 3]
+├── logs/                       
+├── scripts/                    
+├── temp/                       
+├── validation_plots/           # ML metrics and evaluation graphs[cite: 3]
+├── apollo_twin.db              # Lightweight SQLite state and history store[cite: 3]
 ├── .gitattributes              
 ├── .gitignore                  
 ├── LICENSE                     
 └── README.md
-
