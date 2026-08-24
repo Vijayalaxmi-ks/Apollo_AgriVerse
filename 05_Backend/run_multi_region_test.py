@@ -62,24 +62,21 @@ for farm in test_farms:
         print(rec["decision_explanation"]["why"])
         for pro in rec["decision_explanation"]["strengths"][:3]:
             print(f"✅ {pro}")
-            
+        for con in rec["decision_explanation"]["management"][:3]:
+            print(f"⚠️ {con}")
+
         print("\n💰 MONEY OUTLOOK")
         market = rec["score_tree"]["market"]
-        price_display = f"₹{market['modal_price']}/qtl" if market.get("modal_price") else "Available market demand"
-        print(f"{c_name} market outlook: modal price {price_display}; trend {market.get('trend', 'STABLE')}.")
-        
-        if rec["decision_explanation"]["management"]:
-            print("\n⚠️ WHAT YOU NEED TO MANAGE")
-            for con in rec["decision_explanation"]["management"][:3]:
-                print(f"• {con}")
-                
+        price = market.get("modal_price")
+        price_text = f"₹{price}/qtl" if price is not None else "unavailable"
+        print(f"Modal price: {price_text}; trend: {market.get('trend', 'STABLE')}.")
+
         print("\n👉 VERDICT:")
         print(
-            f"{c_name} scores {rec['final_suitability_score']:.1f}% overall "
-            f"and is classified as {rec['suitability_band'].lower()} for this farm."
+            f"{c_name} scores {rec['final_suitability_score']:.1f}% and is "
+            f"{rec['suitability_band'].lower()} for this farm."
         )
-        
-        # Dynamic Grape Varieties (Only rendered if focus crop matches and varieties are present)
+
         if rec.get("variety_recommendations"):
             print(f"\n🍇 BEST GRAPE VARIETIES FOR YOUR FARM")
             var_medals = ["🥇", "🥈", "🥉"]
@@ -91,14 +88,10 @@ for farm in test_farms:
                     for key, value in var.get("traits", {}).items()
                 )
                 reason = " ".join(var.get("reasons", []) + var.get("cautions", []))
-                details = "; ".join(
-                    item for item in [
-                        f"suitability score {var['suitability_score']:.1f}%",
-                        traits,
-                        reason,
-                    ] if item
+                print(
+                    f"Best fit because it features: suitability score "
+                    f"{var['suitability_score']:.1f}%; {traits}. {reason}"
                 )
-                print(f"Best fit because it features: {details}")
             
         print("\n" + "-" * 64)
 

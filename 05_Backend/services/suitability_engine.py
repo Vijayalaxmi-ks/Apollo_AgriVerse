@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -12,481 +12,822 @@ logger = logging.getLogger("AgronomicSuitabilityEngine")
 
 class AgronomicSuitabilityEngine:
     """
-    Apollo AgriVerse - Farm Suitability Engine.
+    Apollo AgriVerse suitability engine.
 
-    Current prototype scope:
-    - Maharashtra-focused farm evaluation.
-    - Grape is the primary crop of interest.
-    - Other Maharashtra-relevant crops are retained for comparison.
-    - Agronomic suitability is evaluated BEFORE market ranking.
-    - The engine returns both technical scores and farmer-friendly reasons.
+    Current scope:
+      - Maharashtra only.
+      - Candidate crops are read dynamically from the crop knowledge table.
+      - Region is resolved by region_id / district / state.
+      - Soil is resolved by soil_id.
+      - Crop-soil requirements are resolved through crop_id + soil identity.
+      - Suitability is calculated from available bio-physical and chemical factors.
+      - Market is a separate economic component.
+      - If GRAPE is the highest-scoring crop, grape varieties are ranked dynamically.
 
     Important:
-    This engine does not invent agronomic values. Where a knowledge-base field is
-    unavailable, it uses a neutral baseline and records that the factor is not
-    available instead of pretending that a measurement exists.
+      The weights below are engineering weights for the prototype, not claims of
+      universal agronomic truth. Missing measurements are excluded from the
+      weighted mean rather than fabricated.
     """
 
-    HIGH_WATER_CROPS = {
-        "SUGARCANE",
-        "RICE",
-        "PADDY",
-        "BANANA",
-    }
-
-    LOW_WATER_CROPS = {
-        "MILLET",
-        "BAJRA",
-        "JOWAR",
-        "SORGHUM",
-    }
-
-    MAHARASHTRA_CROPS = {
-        "GRAPE",
-        "POMEGRANATE",
-        "ONION",
-        "COTTON",
-        "SUGARCANE",
-        "SOYBEAN",
-        "JOWAR",
-        "SORGHUM",
-        "BAJRA",
-        "MAIZE",
-        "WHEAT",
-        "RICE",
-        "PADDY",
-        "TUR",
-        "CHICKPEA",
-        "GRAM",
-        "GROUNDNUT",
-        "SUNFLOWER",
-    }
-
-    FOCUS_CROP = "GRAPE"
-
+    STATE_SCOPE = "Maharashtra"
     AGRONOMIC_PASS_THRESHOLD = 60.0
+
+    # Agronomic score = climate + soil + water.
+    AGRONOMIC_WEIGHTS = {
+        "climate": 0.40,
+        "soil": 0.40,
+        "water": 0.20,
+    }
+
+    # Climate internal weights.
+    CLIMATE_WEIGHTS = {
+        "temperature": 0.50,
+        "rainfall": 0.30,
+        "live_temperature": 0.20,
+    }
+
+    # Soil internal weights.
+    SOIL_WEIGHTS = {
+        "ph": 0.25,
+        "texture": 0.20,
+        "organic_carbon": 0.15,
+        "ec": 0.15,
+        "nitrogen": 0.10,
+        "phosphorus": 0.075,
+        "potassium": 0.075,
+    }
+
+    # Final score = agronomic + market.
+    FINAL_WEIGHTS = {
+        "agronomic": 0.70,
+        "market": 0.30,
+    }
+
+    # Only used to recognize the focus crop for the variety layer.
+    # It does NOT force grape to be the crop recommendation.
+    FOCUS_CROP = "GRAPE"
 
     def __init__(
         self,
         loader: KnowledgeBaseLoader,
         api_service: ExternalDataService,
-        state_scope: str = "Maharashtra",
-        focus_crop: str = "GRAPE",
+        state_scope: str = STATE_SCOPE,
+        focus_crop: str = FOCUS_CROP,
+        prefer_focus_crop: bool = True,
     ):
         self.loader = loader
         self.api_service = api_service
-        self.state_scope = state_scope
-        self.focus_crop = self._normalize_crop_name(focus_crop)
+        self.state_scope = str(state_scope).strip()
+
+        if self.state_scope.casefold() != self.STATE_SCOPE.casefold():
+            raise ValueError("AgronomicSuitabilityEngine is restricted to Maharashtra.")
+
+        self.focus_crop = self._normalize_name(focus_crop)
+        self.prefer_focus_crop = prefer_focus_crop
+
+        # Work only on Maharashtra regions for this prototype.
+        regions = self.loader.regions_df.copy()
+        if "state" not in regions.columns:
+            raise ValueError("Region knowledge base must contain a 'state' column.")
+
+        self.maharashtra_regions = regions[
+            regions["state"].astype(str).str.strip().str.casefold()
+            == self.state_scope.casefold()
+        ].copy()
+
+        if self.maharashtra_regions.empty:
+            raise ValueError("No Maharashtra rows found in region knowledge base.")
+
+        # Keep the original IDs; do not replace them with names.
+        self._prepare_ids()
 
     # ------------------------------------------------------------------
-    # NORMALIZATION / HELPERS
+    # BASIC HELPERS
     # ------------------------------------------------------------------
 
-    def _normalize_crop_name(self, name: str) -> str:
-        clean = re.sub(r"[^a-zA-Z]", "", str(name)).lower()
-
+    @staticmethod
+    def _normalize_name(value: Any) -> str:
+        text = re.sub(r"[^a-zA-Z0-9]+", "", str(value)).lower()
         aliases = {
             "grapes": "grape",
             "paddy": "rice",
             "sorghum": "jowar",
-            "chickpeas": "chickpea",
             "gram": "chickpea",
+            "chickpeas": "chickpea",
         }
-
-        clean = aliases.get(clean, clean)
-        return clean.upper()
+        return aliases.get(text, text).upper()
 
     @staticmethod
-    def _first_value(row: pd.Series, aliases: List[str], default=None):
-        for key in aliases:
-            if key in row.index and pd.notna(row[key]):
-                value = row[key]
+    def _clean_text(value: Any) -> str:
+        if value is None or pd.isna(value):
+            return ""
+        return str(value).strip()
+
+    @staticmethod
+    def _num(row: pd.Series, aliases: List[str]) -> Optional[float]:
+        for col in aliases:
+            if col in row.index and pd.notna(row[col]):
+                try:
+                    return float(row[col])
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    @staticmethod
+    def _first(row: pd.Series, aliases: List[str], default=None):
+        for col in aliases:
+            if col in row.index and pd.notna(row[col]):
+                value = row[col]
                 if str(value).strip() != "":
                     return value
         return default
 
     @staticmethod
-    def _numeric(row: pd.Series, aliases: List[str], default=None):
-        value = AgronomicSuitabilityEngine._first_value(row, aliases, default)
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
+    def _norm_id(value: Any) -> str:
+        return str(value).strip().casefold()
 
-    def _get_region(self, farm_data: Dict[str, Any]) -> pd.Series:
-        regions = self.loader.regions_df.copy()
-
-        region_id = farm_data.get("region_id")
-        if region_id is not None:
-            match = regions[regions["region_id"].astype(str) == str(region_id)]
-            if not match.empty:
-                row = match.iloc[0]
-                if str(row.get("state", "")).strip().lower() == self.state_scope.lower():
-                    return row
-
-        state_rows = regions[
-            regions["state"].astype(str).str.strip().str.lower()
-            == self.state_scope.lower()
-        ]
-
-        if state_rows.empty:
-            raise ValueError(
-                f"No {self.state_scope} region exists in the loaded region knowledge base."
+    def _prepare_ids(self):
+        if "crop_id" in self.loader.crops_df.columns:
+            self.loader.crops_df["_canonical_crop"] = (
+                self.loader.crops_df["crop_name"]
+                .map(self._normalize_name)
+                if "crop_name" in self.loader.crops_df.columns
+                else self.loader.crops_df["crop_id"].map(self._normalize_name)
             )
 
-        preferred_districts = ["Nashik", "Pune", "Sangli", "Satara", "Ahmednagar", "Solapur"]
-        for district in preferred_districts:
-            match = state_rows[
-                state_rows["district"].astype(str).str.strip().str.lower()
-                == district.lower()
+        if "crop_id" in self.loader.requirements_df.columns:
+            self.loader.requirements_df["_canonical_crop_id"] = (
+                self.loader.requirements_df["crop_id"].map(self._norm_id)
+            )
+
+        if "crop_id" in self.loader.varieties_df.columns:
+            self.loader.varieties_df["_canonical_crop_id"] = (
+                self.loader.varieties_df["crop_id"].map(self._norm_id)
+            )
+
+    # ------------------------------------------------------------------
+    # REGION / SOIL
+    # ------------------------------------------------------------------
+
+    def _get_region(self, farm: Dict[str, Any]) -> pd.Series:
+        regions = self.maharashtra_regions
+
+        region_id = farm.get("region_id")
+        if region_id is not None:
+            m = regions[
+                regions["region_id"].map(self._norm_id) == self._norm_id(region_id)
             ]
-            if not match.empty:
-                return match.iloc[0]
+            if not m.empty:
+                return m.iloc[0]
 
-        return state_rows.iloc[0]
+        district = farm.get("district")
+        if district:
+            m = regions[
+                regions["district"].astype(str).str.strip().str.casefold()
+                == str(district).strip().casefold()
+            ]
+            if not m.empty:
+                return m.iloc[0]
 
-    def _get_soil(self, farm_data: Dict[str, Any]) -> pd.Series:
+        # Deterministic fallback only when the caller did not specify a region.
+        preferred = ["Nashik", "Sangli", "Pune", "Satara", "Ahmednagar", "Solapur"]
+        for d in preferred:
+            m = regions[
+                regions["district"].astype(str).str.strip().str.casefold()
+                == d.casefold()
+            ]
+            if not m.empty:
+                return m.iloc[0]
+
+        return regions.iloc[0]
+
+    def _get_soil(self, farm: Dict[str, Any]) -> pd.Series:
         soils = self.loader.soils_df.copy()
 
-        soil_id = farm_data.get("soil_id")
-        if soil_id is not None:
-            match = soils[soils["soil_id"].astype(str) == str(soil_id)]
-            if not match.empty:
-                return match.iloc[0]
+        if "state" in soils.columns:
+            scoped = soils[
+                soils["state"].astype(str).str.strip().str.casefold()
+                == self.state_scope.casefold()
+            ]
+            if scoped.empty:
+                raise ValueError("No Maharashtra rows found in soil knowledge base.")
+            soils = scoped
 
-        # Prefer Maharashtra-relevant black soils for the current prototype.
-        soil_text = soils.astype(str).agg(" ".join, axis=1).str.lower()
-        black = soils[soil_text.str.contains("black|regur|vertisol", regex=True, na=False)]
-        if not black.empty:
-            return black.iloc[0]
+        soil_id = farm.get("soil_id")
+        if soil_id is not None:
+            m = soils[
+                soils["soil_id"].map(self._norm_id) == self._norm_id(soil_id)
+            ]
+            if not m.empty:
+                return m.iloc[0]
+
+        soil_type = farm.get("soil_type")
+        if soil_type:
+            m = soils[
+                soils.apply(
+                    lambda r: self._normalize_name(
+                        self._first(
+                            r,
+                            ["soil_type", "soil_name", "texture"],
+                            "",
+                        )
+                    )
+                    == self._normalize_name(soil_type),
+                    axis=1,
+                )
+            ]
+            if not m.empty:
+                return m.iloc[0]
 
         return soils.iloc[0]
 
-    def _candidate_crops(self) -> pd.DataFrame:
-        crops = self.loader.crops_df.copy()
-        crops["canonical_name"] = crops["crop_name"].apply(self._normalize_crop_name)
-        crops = crops.drop_duplicates(subset=["canonical_name"])
+    # ------------------------------------------------------------------
+    # REQUIREMENT LOOKUP
+    # ------------------------------------------------------------------
 
-        # Keep only the Maharashtra crop set where possible.
-        scoped = crops[crops["canonical_name"].isin(self.MAHARASHTRA_CROPS)]
+    def _get_crop_requirements(
+        self,
+        crop: pd.Series,
+        soil: pd.Series,
+    ) -> Optional[pd.Series]:
+        req = self.loader.requirements_df.copy()
 
-        # If the knowledge base has fewer rows than expected, do not fail.
-        # Use the available crop knowledge rather than inventing rows.
-        if not scoped.empty:
-            crops = scoped
+        if req.empty or "crop_id" not in req.columns:
+            return None
 
-        return crops
+        crop_id = self._norm_id(crop.get("crop_id", ""))
+        req["_cid"] = req["crop_id"].map(self._norm_id)
+
+        matches = req[req["_cid"] == crop_id]
+
+        if matches.empty:
+            crop_name = self._normalize_name(crop.get("crop_name", ""))
+            matches = req[
+                req["crop_id"].map(self._normalize_name) == crop_name
+            ]
+
+        if matches.empty:
+            return None
+
+        soil_name = self._normalize_name(
+            self._first(soil, ["soil_type", "soil_name", "texture"], "")
+        )
+
+        for col in ["soil_id", "soil_type", "soil_name", "texture"]:
+            if col not in matches.columns:
+                continue
+
+            if col == "soil_id":
+                m = matches[
+                    matches[col].map(self._norm_id)
+                    == self._norm_id(soil.get("soil_id", ""))
+                ]
+            else:
+                m = matches[
+                    matches[col].map(self._normalize_name) == soil_name
+                ]
+
+            if not m.empty:
+                return m.iloc[0]
+
+        return matches.iloc[0]
+
+    # ------------------------------------------------------------------
+    # RANGE SCORING
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _range_score(
+        value: Optional[float],
+        optimum_min: Optional[float],
+        optimum_max: Optional[float],
+        critical_min: Optional[float] = None,
+        critical_max: Optional[float] = None,
+    ) -> Optional[float]:
+        if value is None or optimum_min is None or optimum_max is None:
+            return None
+
+        lo, hi = sorted((float(optimum_min), float(optimum_max)))
+
+        if lo <= value <= hi:
+            return 100.0
+
+        width = max(hi - lo, 1e-9)
+
+        if value < lo:
+            boundary = critical_min
+            if boundary is None:
+                boundary = lo - 0.25 * width
+            if value <= boundary:
+                return 0.0
+            return max(0.0, min(100.0, 100.0 * (value - boundary) / (lo - boundary)))
+
+        boundary = critical_max
+        if boundary is None:
+            boundary = hi + 0.25 * width
+        if value >= boundary:
+            return 0.0
+        return max(0.0, min(100.0, 100.0 * (boundary - value) / (boundary - hi)))
+
+    @staticmethod
+    def _weighted_mean(values: Dict[str, Optional[float]], weights: Dict[str, float]):
+        usable = [
+            (k, v, weights[k])
+            for k, v in values.items()
+            if v is not None and k in weights
+        ]
+        if not usable:
+            return 0.0
+
+        weight_sum = sum(w for _, _, w in usable)
+        return round(sum(v * w for _, v, w in usable) / weight_sum, 1)
 
     # ------------------------------------------------------------------
     # CLIMATE
     # ------------------------------------------------------------------
 
-    def _calculate_multi_vector_climate_score(
+    def _climate_score(
         self,
-        live_temp: float,
-        live_weather: bool,
-        region_info: pd.Series,
         crop: pd.Series,
-    ) -> Tuple[float, Dict[str, float], List[str], List[str]]:
+        req: Optional[pd.Series],
+        region: pd.Series,
+        live_temp: Optional[float],
+        live_weather: bool,
+    ):
         pros, cons = [], []
+        source = req if req is not None else crop
 
-        hist_min = self._numeric(
-            region_info,
-            ["avg_temp_min", "annual_avg_temp_min", "temp_min"],
-            20.0,
+        crop_min = self._num(
+            source,
+            ["optimal_temperature_min_c", "ideal_temp_min", "min_temp", "temp_min"],
         )
-        hist_max = self._numeric(
-            region_info,
-            ["avg_temp_max", "annual_avg_temp_max", "temp_max"],
-            37.0,
-        )
-
-        crop_min = self._numeric(
-            crop,
-            ["ideal_temp_min", "min_temp", "temp_min"],
-            18.0,
-        )
-        crop_max = self._numeric(
-            crop,
-            ["ideal_temp_max", "max_temp", "temp_max"],
-            36.0,
+        crop_max = self._num(
+            source,
+            ["optimal_temperature_max_c", "ideal_temp_max", "max_temp", "temp_max"],
         )
 
-        # Seasonal compatibility: overlap between regional and crop temperature ranges.
-        overlap_min = max(hist_min, crop_min)
-        overlap_max = min(hist_max, crop_max)
+        reg_min = self._num(
+            region,
+            ["avg_temp_min", "annual_avg_temp_min", "temp_min", "min_temperature_c"],
+        )
+        reg_max = self._num(
+            region,
+            ["avg_temp_max", "annual_avg_temp_max", "temp_max", "max_temperature_c"],
+        )
 
-        if overlap_min <= overlap_max:
-            seasonal_score = 100.0
-            pros.append(
-                f"Seasonal climate: the regional temperature range "
-                f"({hist_min:.1f}–{hist_max:.1f}°C) overlaps the crop's preferred "
-                f"range ({crop_min:.1f}–{crop_max:.1f}°C)."
-            )
-        else:
-            gap = min(abs(hist_min - crop_max), abs(crop_min - hist_max))
-            seasonal_score = max(0.0, 100.0 - gap * 12.0)
-            cons.append(
-                f"Seasonal climate: the regional temperature pattern is outside "
-                f"the preferred range ({crop_min:.1f}–{crop_max:.1f}°C)."
-            )
+        temp_score = None
+        if crop_min is not None and crop_max is not None and reg_min is not None and reg_max is not None:
+            s1 = self._range_score(reg_min, crop_min, crop_max)
+            s2 = self._range_score(reg_max, crop_min, crop_max)
+            temp_score = (s1 + s2) / 2.0
 
-        rainfall = self._numeric(
-            region_info,
+            if temp_score >= 80:
+                pros.append(
+                    f"Temperature: regional range {reg_min:.1f}–{reg_max:.1f}°C "
+                    f"is compatible with the crop's preferred {crop_min:.1f}–{crop_max:.1f}°C."
+                )
+            else:
+                cons.append(
+                    f"Temperature: regional range {reg_min:.1f}–{reg_max:.1f}°C "
+                    f"does not fully fit the crop's preferred {crop_min:.1f}–{crop_max:.1f}°C."
+                )
+
+        rainfall = self._num(
+            region,
             ["annual_rainfall_mm", "rainfall_mm", "annual_rainfall"],
-            None,
+        )
+        crop_rain = self._num(
+            source,
+            ["rainfall_requirement_mm", "annual_rainfall_requirement_mm"],
         )
 
-        if rainfall is None:
+        rainfall_score = None
+        if rainfall is not None and crop_rain is not None and crop_rain > 0:
+            ratio = rainfall / crop_rain
+            rainfall_score = max(0.0, 100.0 - min(abs(1.0 - ratio), 1.0) * 100.0)
+            if rainfall_score >= 80:
+                pros.append(
+                    f"Rainfall: regional annual rainfall (~{rainfall:.0f} mm) is close "
+                    f"to the crop requirement (~{crop_rain:.0f} mm)."
+                )
+            else:
+                cons.append(
+                    f"Rainfall: regional annual rainfall (~{rainfall:.0f} mm) differs "
+                    f"from the crop requirement (~{crop_rain:.0f} mm)."
+                )
+        elif rainfall is not None:
             rainfall_score = 70.0
-            cons.append("Rainfall: regional rainfall data is not available in the knowledge base.")
-        else:
-            # Conservative prototype score; exact crop rainfall requirements
-            # should come from crop-specific knowledge when those fields exist.
-            rainfall_score = 90.0 if rainfall >= 700 else 65.0
-            if rainfall >= 700:
-                pros.append(
-                    f"Seasonal rainfall: the regional annual rainfall is about {rainfall:.0f} mm."
-                )
+            cons.append("Rainfall: crop-specific rainfall requirement is not available.")
+
+        live_score = None
+        if live_weather and live_temp is not None and crop_min is not None and crop_max is not None:
+            live_score = self._range_score(live_temp, crop_min, crop_max)
+            if live_score >= 80:
+                pros.append(f"Live temperature: {live_temp:.1f}°C is currently suitable.")
             else:
-                cons.append(
-                    f"Seasonal rainfall: annual rainfall is relatively low ({rainfall:.0f} mm); "
-                    "irrigation planning is important."
-                )
+                cons.append(f"Live temperature: {live_temp:.1f}°C is outside the preferred range.")
+        elif not live_weather:
+            cons.append("Live weather: unavailable; regional climate data is being used.")
 
-        live_score = 70.0
-        if live_weather and live_temp is not None:
-            if crop_min <= live_temp <= crop_max:
-                live_score = 100.0
-                pros.append(
-                    f"Current weather: live temperature ({live_temp:.1f}°C) is within "
-                    f"the crop's preferred range."
-                )
-            else:
-                distance = min(abs(live_temp - crop_min), abs(live_temp - crop_max))
-                live_score = max(0.0, 100.0 - distance * 15.0)
-                cons.append(
-                    f"Current weather: live temperature ({live_temp:.1f}°C) is outside "
-                    f"the crop's preferred range."
-                )
-        else:
-            pros.append(
-                "Current weather: live telemetry is unavailable, so the score relies "
-                "on the regional climate profile."
-            )
-
-        total = round(
-            (seasonal_score * 0.50)
-            + (rainfall_score * 0.30)
-            + (live_score * 0.20),
-            1,
-        )
-
-        breakdown = {
-            "seasonal_temperature": round(seasonal_score, 1),
-            "rainfall": round(rainfall_score, 1),
-            "live_temperature": round(live_score, 1),
+        values = {
+            "temperature": temp_score,
+            "rainfall": rainfall_score,
+            "live_temperature": live_score,
         }
+        score = self._weighted_mean(values, self.CLIMATE_WEIGHTS)
 
-        return total, breakdown, pros, cons
+        return score, {
+            "temperature": None if temp_score is None else round(temp_score, 1),
+            "rainfall": None if rainfall_score is None else round(rainfall_score, 1),
+            "live_temperature": None if live_score is None else round(live_score, 1),
+        }, pros, cons
 
     # ------------------------------------------------------------------
     # SOIL
     # ------------------------------------------------------------------
 
-    def _score_range(
-        self,
-        value: float,
-        minimum: float,
-        maximum: float,
-    ) -> float:
-        if minimum <= value <= maximum:
-            return 100.0
-
-        distance = min(abs(value - minimum), abs(value - maximum))
-        return max(0.0, 100.0 - distance * 20.0)
-
-    def _calculate_expanded_soil_score(
-        self,
-        soil_info: pd.Series,
-        crop: pd.Series,
-    ) -> Tuple[float, Dict[str, float], List[str], List[str]]:
+    def _soil_score(self, soil: pd.Series, crop: pd.Series, req: Optional[pd.Series]):
         pros, cons = [], []
+        source = req if req is not None else crop
+        values = {}
 
-        soil_ph = self._numeric(soil_info, ["ph", "pH"], 7.2)
-        min_ph = self._numeric(crop, ["min_ph", "ph_min"], 6.0)
-        max_ph = self._numeric(crop, ["max_ph", "ph_max"], 8.0)
+        ph = self._num(soil, ["ph", "pH", "soil_ph"])
+        ph_min = self._num(source, ["ph_min", "min_ph", "optimal_ph_min"])
+        ph_max = self._num(source, ["ph_max", "max_ph", "optimal_ph_max"])
+        ph_crit_min = self._num(source, ["critical_ph_min"])
+        ph_crit_max = self._num(source, ["critical_ph_max"])
 
-        ph_score = self._score_range(soil_ph, min_ph, max_ph)
+        values["ph"] = self._range_score(ph, ph_min, ph_max, ph_crit_min, ph_crit_max)
 
-        if ph_score >= 90:
-            pros.append(
-                f"Soil acidity: pH {soil_ph:.2f} is suitable for the crop "
-                f"(preferred range {min_ph:.1f}–{max_ph:.1f})."
-            )
-        else:
-            cons.append(
-                f"Soil acidity: pH {soil_ph:.2f} is outside the preferred range; "
-                "soil correction may be required."
-            )
+        if values["ph"] is not None:
+            if values["ph"] >= 80:
+                pros.append(f"Soil pH: {ph:.2f} is within/near the preferred range.")
+            else:
+                cons.append(f"Soil pH: {ph:.2f} is outside the preferred range.")
 
-        # Soil type / texture compatibility.
-        soil_type = str(
-            self._first_value(soil_info, ["soil_type", "soil_name", "texture"], "Unknown")
-        ).strip()
-
-        crop_texture = self._first_value(
-            crop,
-            ["preferred_soil_type", "soil_type", "preferred_texture", "texture"],
+        actual_soil = self._normalize_name(
+            self._first(soil, ["soil_type", "soil_name", "texture"], "")
+        )
+        required_soil = self._first(
+            source,
+            ["soil_type", "preferred_soil_type", "preferred_texture", "texture"],
             None,
         )
 
-        if crop_texture is None:
-            texture_score = 75.0
-            cons.append(
-                "Soil structure: crop-specific texture requirements are not present "
-                "in the current knowledge base."
-            )
-        else:
-            required = str(crop_texture).lower()
-            actual = soil_type.lower()
-            texture_score = 100.0 if (
-                required in actual or actual in required
-            ) else 55.0
-
-            if texture_score >= 90:
-                pros.append(
-                    f"Soil structure: {soil_type} is compatible with the crop's "
-                    f"preferred soil type."
-                )
+        if required_soil is not None and actual_soil:
+            required_tokens = {
+                self._normalize_name(x)
+                for x in re.split(r"[,;/|]+", str(required_soil))
+                if str(x).strip()
+            }
+            texture_score = 100.0 if actual_soil in required_tokens else 0.0
+            if texture_score >= 80:
+                pros.append("Soil type: farm soil matches the crop's soil requirement.")
             else:
                 cons.append(
-                    f"Soil structure: the farm has {soil_type}, while the crop "
-                    f"knowledge base prefers {crop_texture}."
+                    f"Soil type: {self._first(soil, ['soil_type','soil_name','texture'], 'Unknown')} "
+                    f"does not match the stated crop requirement ({required_soil})."
                 )
-
-        oc = self._numeric(
-            soil_info,
-            ["oc", "organic_carbon", "organic_carbon_pct"],
-            None,
-        )
-
-        if oc is None:
-            oc_score = 70.0
-            cons.append("Organic carbon: no measured value is available in the soil profile.")
+            values["texture"] = texture_score
         else:
-            oc_score = 100.0 if oc >= 0.75 else 80.0 if oc >= 0.5 else 60.0
-            if oc >= 0.75:
-                pros.append(f"Organic carbon: {oc:.2f}% provides a good soil carbon base.")
-            elif oc >= 0.5:
-                pros.append(f"Organic carbon: {oc:.2f}% is moderate; organic matter management is recommended.")
+            values["texture"] = None
+            cons.append("Soil type: crop-specific soil compatibility data is unavailable.")
+
+        oc = self._num(soil, ["oc", "organic_carbon", "organic_carbon_pct"])
+        oc_min = self._num(source, ["oc_min", "organic_carbon_min", "optimal_oc_min"])
+        oc_max = self._num(source, ["oc_max", "organic_carbon_max", "optimal_oc_max"])
+
+        if oc_min is not None and oc_max is not None:
+            values["organic_carbon"] = self._range_score(oc, oc_min, oc_max)
+        else:
+            values["organic_carbon"] = None
+
+        ec = self._num(soil, ["ec", "electrical_conductivity", "ec_ds_m"])
+        ec_max = self._num(source, ["ec_max", "max_ec", "optimal_ec_max"])
+        if ec is not None and ec_max is not None:
+            if ec <= ec_max:
+                values["ec"] = 100.0
+                pros.append(f"Salinity: EC {ec:.2f} dS/m is within the crop limit.")
             else:
-                cons.append(f"Organic carbon: {oc:.2f}% is low; organic matter improvement is recommended.")
-
-        ec = self._numeric(
-            soil_info,
-            ["ec", "electrical_conductivity", "ec_ds_m"],
-            None,
-        )
-
-        if ec is None:
-            ec_score = 70.0
-            cons.append("Salinity: EC measurement is not available in the soil profile.")
+                values["ec"] = max(0.0, min(100.0, 100.0 * (1.0 - max(ec - ec_max, 0) / max(ec_max, 1e-9))))
+                cons.append(f"Salinity: EC {ec:.2f} dS/m exceeds the crop limit.")
         else:
-            if ec <= 2.0:
-                ec_score = 100.0
-                pros.append(f"Salinity: EC {ec:.2f} dS/m is within the current tolerance limit.")
+            values["ec"] = None
+
+        for nutrient, aliases_value, aliases_min, aliases_max in [
+            ("nitrogen", ["n", "nitrogen", "nitrogen_kg_ha"], ["n_min", "nitrogen_min"], ["n_max", "nitrogen_max"]),
+            ("phosphorus", ["p", "phosphorus", "phosphorus_kg_ha"], ["p_min", "phosphorus_min"], ["p_max", "phosphorus_max"]),
+            ("potassium", ["k", "potassium", "potassium_kg_ha"], ["k_min", "potassium_min"], ["k_max", "potassium_max"]),
+        ]:
+            observed = self._num(soil, aliases_value)
+            lo = self._num(source, aliases_min)
+            hi = self._num(source, aliases_max)
+
+            if observed is not None and lo is not None and hi is not None:
+                values[nutrient] = self._range_score(observed, lo, hi)
             else:
-                ec_score = max(0.0, 100.0 - (ec - 2.0) * 25.0)
-                cons.append(
-                    f"Salinity: EC {ec:.2f} dS/m is elevated and may stress the crop."
-                )
+                values[nutrient] = None
 
-        # Do not fabricate NPK numbers. If the soil KB has them, use them;
-        # otherwise report that the factor needs a soil-test input.
-        npk_available = all(
-            self._numeric(soil_info, aliases, None) is not None
-            for aliases in [
-                ["n", "nitrogen", "nitrogen_kg_ha"],
-                ["p", "phosphorus", "phosphorus_kg_ha"],
-                ["k", "potassium", "potassium_kg_ha"],
-            ]
-        )
-
-        if npk_available:
-            npk_score = 85.0
-            pros.append("NPK: measured nutrient values are available for nutrient-level assessment.")
-        else:
-            npk_score = 70.0
-            cons.append(
-                "NPK: a complete measured N-P-K profile is required for precise fertilizer advice."
-            )
-
-        sub_scores = {
-            "ph": round(ph_score, 1),
-            "texture": round(texture_score, 1),
-            "organic_carbon": round(oc_score, 1),
-            "ec_salinity": round(ec_score, 1),
-            "npk_balance": round(npk_score, 1),
-        }
-
-        overall_soil = round(sum(sub_scores.values()) / len(sub_scores), 1)
-        return overall_soil, sub_scores, pros, cons
+        score = self._weighted_mean(values, self.SOIL_WEIGHTS)
+        return score, {k: (None if v is None else round(v, 1)) for k, v in values.items()}, pros, cons
 
     # ------------------------------------------------------------------
     # WATER
     # ------------------------------------------------------------------
 
-    def _get_water_req_level(self, crop_name: str, crop: pd.Series) -> str:
-        req = str(crop.get("water_requirement", "")).lower()
+    def _water_score(self, farm: Dict[str, Any], crop: pd.Series, req: Optional[pd.Series]):
+        availability = str(farm.get("water_availability", "medium")).strip().lower()
+        source = req if req is not None else crop
+        requirement = self._num(
+            source,
+            ["water_requirement_l_day", "water_requirement_mm", "water_requirement"],
+        )
+        drought = self._num(
+            source,
+            ["drought_tolerance_index", "drought_tolerance"],
+        )
 
-        if crop_name in self.HIGH_WATER_CROPS or "high" in req:
-            return "high"
+        availability_score = {
+            "low": 35.0,
+            "medium": 70.0,
+            "high": 95.0,
+        }.get(availability, 70.0)
 
-        if crop_name in self.LOW_WATER_CROPS or "low" in req:
-            return "low"
+        drought_score = None
+        if drought is not None:
+            drought_score = drought * 100.0 if 0 <= drought <= 1 else max(0.0, min(100.0, drought))
 
-        return "medium"
+        requirement_penalty = 0.0
+        if requirement is not None:
+            if availability == "low":
+                requirement_penalty = min(25.0, requirement / 100.0)
+            elif availability == "medium":
+                requirement_penalty = min(10.0, requirement / 200.0)
 
-    def _calculate_water_score(
-        self,
-        water_avail: str,
-        water_req: str,
-    ) -> Tuple[float, List[str], List[str]]:
-        matrix = {
-            "low": {"high": 35.0, "medium": 50.0, "low": 65.0},
-            "medium": {"high": 60.0, "medium": 80.0, "low": 90.0},
-            "high": {"high": 85.0, "medium": 95.0, "low": 100.0},
-        }
+        water_score = availability_score - requirement_penalty
+        if drought_score is not None:
+            water_score = 0.75 * water_score + 0.25 * drought_score
 
-        availability = water_avail if water_avail in matrix else "medium"
-        score = matrix[availability][water_req]
-
+        water_score = round(max(0.0, min(100.0, water_score)), 1)
         pros, cons = [], []
-
-        if score >= 80:
-            pros.append("Water: current water availability is adequate for this crop.")
-        elif score >= 60:
-            cons.append(
-                "Water: moderate constraint; efficient irrigation should be planned."
-            )
+        if water_score >= 80:
+            pros.append("Water: available supply is broadly compatible with this crop.")
+        elif water_score >= 60:
+            cons.append("Water: efficient irrigation should be planned.")
         else:
-            cons.append(
-                "Water: significant constraint; reliable micro-irrigation and water "
-                "conservation will be required."
-            )
+            cons.append("Water: low availability creates meaningful crop stress risk; drip/micro-irrigation is recommended.")
 
-        return score, pros, cons
+        return water_score, pros, cons
 
     # ------------------------------------------------------------------
-    # EVALUATION
+    # MARKET
+    # ------------------------------------------------------------------
+
+    def _market_score(self, state: str, district: str, crop_name: str):
+        try:
+            mandi = self.api_service.get_mandi_market_data(state, district, crop_name) or {}
+        except Exception as exc:
+            logger.warning("Market API unavailable for %s: %s", crop_name, exc)
+            mandi = {}
+
+        trend = str(mandi.get("price_trend", "STABLE")).upper()
+        price = mandi.get("modal_price_per_qtl")
+
+        trend_score = {
+            "UPWARD": 100.0,
+            "STABLE": 70.0,
+            "DOWNWARD": 40.0,
+        }.get(trend, 60.0)
+
+        return {
+            "score": trend_score,
+            "modal_price": price,
+            "trend": trend,
+        }
+
+    # ------------------------------------------------------------------
+    # VARIETY LAYER
+    # ------------------------------------------------------------------
+
+    def _crop_id_for_focus(self, crop_record: pd.Series) -> str:
+        return self._norm_id(crop_record.get("crop_id", ""))
+
+    def _variety_candidates(
+        self,
+        crop_record: pd.Series,
+        region: pd.Series,
+    ) -> pd.DataFrame:
+        varieties = self.loader.varieties_df.copy()
+        if varieties.empty or "crop_id" not in varieties.columns:
+            return varieties.iloc[0:0]
+
+        crop_id = self._crop_id_for_focus(crop_record)
+        varieties["_cid"] = varieties["crop_id"].map(self._norm_id)
+        candidates = varieties[varieties["_cid"] == crop_id].copy()
+
+        if candidates.empty and "crop_name" in varieties.columns:
+            canonical = self._normalize_name(crop_record.get("crop_name", ""))
+            candidates = varieties[
+                varieties["crop_name"].map(self._normalize_name) == canonical
+            ].copy()
+
+        if "state" in candidates.columns:
+            state_filtered = candidates[
+                candidates["state"].astype(str).str.strip().str.casefold()
+                == self.state_scope.casefold()
+            ]
+            candidates = state_filtered
+
+        if "variety_name" in candidates.columns:
+            candidates = candidates.drop_duplicates(
+                subset=["variety_name"], keep="first"
+            )
+
+        return candidates
+
+    def _score_variety(
+        self,
+        variety: pd.Series,
+        region: pd.Series,
+        soil: pd.Series,
+        farm: Dict[str, Any],
+        live_temp: Optional[float],
+        live_weather: bool,
+    ):
+        factors = {}
+        reasons = []
+        cautions = []
+
+        cultivation_region = str(variety.get("cultivation_region", "")).casefold()
+        region_text = " ".join(
+            str(region.get(c, ""))
+            for c in ["district", "region", "region_name", "cultivation_region"]
+            if c in region.index
+        ).casefold()
+
+        if cultivation_region.strip():
+            factors["regional_fit"] = (
+                100.0 if any(token and token in region_text for token in re.split(r"[,;/|]+", cultivation_region))
+                else 70.0
+            )
+        else:
+            factors["regional_fit"] = 70.0
+
+        tmin = self._num(variety, ["optimal_temperature_min_c"])
+        tmax = self._num(variety, ["optimal_temperature_max_c"])
+        live = live_temp if live_weather else None
+
+        if live is not None and tmin is not None and tmax is not None:
+            factors["temperature_fit"] = self._range_score(live, tmin, tmax)
+        else:
+            reg_min = self._num(region, ["avg_temp_min", "annual_avg_temp_min", "temp_min"])
+            reg_max = self._num(region, ["avg_temp_max", "annual_avg_temp_max", "temp_max"])
+            if reg_min is not None and reg_max is not None and tmin is not None and tmax is not None:
+                factors["temperature_fit"] = (
+                    self._range_score(reg_min, tmin, tmax)
+                    + self._range_score(reg_max, tmin, tmax)
+                ) / 2.0
+
+        rain = self._num(region, ["annual_rainfall_mm", "rainfall_mm", "annual_rainfall"])
+        vrain = self._num(variety, ["rainfall_requirement_mm"])
+        if rain is not None and vrain is not None and vrain > 0:
+            factors["rainfall_fit"] = max(
+                0.0, 100.0 - min(abs(rain / vrain - 1.0), 1.0) * 100.0
+            )
+
+        water_avail = str(farm.get("water_availability", "medium")).lower()
+        water_score = {"low": 35.0, "medium": 70.0, "high": 95.0}.get(water_avail, 70.0)
+
+        drought = self._num(variety, ["drought_tolerance_index"])
+        if drought is not None:
+            drought_score = drought * 100.0 if 0 <= drought <= 1 else max(0.0, min(100.0, drought))
+            water_score = 0.75 * water_score + 0.25 * drought_score
+
+        factors["water_fit"] = water_score
+
+        heat = self._num(variety, ["heat_tolerance_index"])
+        if heat is not None:
+            factors["heat_tolerance"] = heat * 100.0 if 0 <= heat <= 1 else max(0.0, min(100.0, heat))
+
+        disease_cols = [
+            "powdery_mildew_risk",
+            "downy_mildew_risk",
+            "anthracnose_risk",
+            "fruit_cracking_risk",
+        ]
+        disease_scores = []
+        for col in disease_cols:
+            if col in variety.index and pd.notna(variety[col]):
+                raw = str(variety[col]).strip().casefold()
+                mapping = {
+                    "low": 100.0,
+                    "medium": 70.0,
+                    "moderate": 70.0,
+                    "high": 35.0,
+                    "very high": 15.0,
+                }
+                if raw in mapping:
+                    disease_scores.append(mapping[raw])
+                else:
+                    try:
+                        x = float(variety[col])
+                        disease_scores.append(max(0.0, min(100.0, 100.0 - x)))
+                    except (TypeError, ValueError):
+                        pass
+
+        if disease_scores:
+            factors["disease_resilience"] = sum(disease_scores) / len(disease_scores)
+
+        demand = str(variety.get("market_demand", "")).casefold()
+        demand_score = {"very high": 100.0, "high": 85.0, "medium": 65.0, "low": 40.0}.get(demand)
+        if demand_score is not None:
+            factors["market_demand"] = demand_score
+
+        profit = str(variety.get("profit_potential", "")).casefold()
+        profit_score = {"very high": 100.0, "high": 85.0, "medium": 65.0, "low": 40.0}.get(profit)
+        if profit_score is not None:
+            factors["profit_potential"] = profit_score
+
+        weights = {
+            "regional_fit": 0.20,
+            "temperature_fit": 0.20,
+            "rainfall_fit": 0.10,
+            "water_fit": 0.15,
+            "heat_tolerance": 0.10,
+            "disease_resilience": 0.10,
+            "market_demand": 0.025,
+            "profit_potential": 0.025,
+        }
+
+        score = self._weighted_mean(factors, weights)
+
+        if score >= 85:
+            reasons.append("Strong match across available farm, climate, and variety attributes.")
+        elif score >= 70:
+            reasons.append("Good overall match, with minor management constraints.")
+        else:
+            cautions.append("Several variety requirements do not closely match the farm profile.")
+
+        return score, factors, reasons, cautions
+
+    def _recommend_grape_varieties(
+        self,
+        crop_record: pd.Series,
+        region: pd.Series,
+        soil: pd.Series,
+        farm: Dict[str, Any],
+        live_temp: Optional[float],
+        live_weather: bool,
+    ) -> List[Dict[str, Any]]:
+        candidates = self._variety_candidates(crop_record, region)
+        results = []
+
+        for _, variety in candidates.iterrows():
+            score, factors, reasons, cautions = self._score_variety(
+                variety, region, soil, farm, live_temp, live_weather
+            )
+
+            results.append(
+                {
+                    "variety_id": variety.get("variety_id"),
+                    "variety_name": variety.get("variety_name", "Unknown"),
+                    "state": variety.get("state"),
+                    "cultivation_region": variety.get("cultivation_region"),
+                    "suitability_score": round(score, 1),
+                    "factor_scores": {k: round(v, 1) for k, v in factors.items()},
+                    "reasons": reasons,
+                    "cautions": cautions,
+                    "traits": {
+                        key: variety.get(key)
+                        for key in [
+                            "berry_color",
+                            "berry_shape",
+                            "berry_size",
+                            "seed_status",
+                            "bunch_size",
+                            "cultivation_region",
+                        ]
+                        if key in variety.index and pd.notna(variety.get(key))
+                    },
+                    "yield_ton_ha": self._num(variety, ["expected_yield_ton_ha"]),
+                    "crop_duration_days": self._num(variety, ["crop_duration_days"]),
+                    "berry_color": variety.get("berry_color"),
+                    "market_demand": variety.get("market_demand"),
+                    "profit_potential": variety.get("profit_potential"),
+                }
+            )
+
+        results.sort(key=lambda x: x["suitability_score"], reverse=True)
+        return results
+
+    # ------------------------------------------------------------------
+    # MAIN EVALUATION
     # ------------------------------------------------------------------
 
     def evaluate_farm(self, farm_data: Dict[str, Any], top_n: int = 5) -> Dict[str, Any]:
-        region_info = self._get_region(farm_data)
-        soil_info = self._get_soil(farm_data)
+        region = self._get_region(farm_data)
+        soil = self._get_soil(farm_data)
 
         lat = farm_data.get("latitude")
         lon = farm_data.get("longitude")
@@ -494,83 +835,67 @@ class AgronomicSuitabilityEngine:
         weather = {"is_live": False, "temp_c": None}
         if lat is not None and lon is not None:
             try:
-                weather = self.api_service.get_live_weather(float(lat), float(lon))
+                weather = self.api_service.get_live_weather(float(lat), float(lon)) or weather
             except Exception as exc:
                 logger.warning("Live weather unavailable: %s", exc)
 
         live_weather = bool(weather.get("is_live", False))
         live_temp = weather.get("temp_c")
 
-        water_avail = str(
-            farm_data.get("water_availability", "medium")
-        ).strip().lower()
+        crops = self.loader.crops_df.copy()
+        if "crop_name" not in crops.columns:
+            raise ValueError("Crop knowledge base must contain 'crop_name'.")
 
-        crops_df = self._candidate_crops()
+        crops["_canonical_crop"] = crops["crop_name"].map(self._normalize_name)
 
-        recs, disqualified = [], []
+        recommendations = []
+        disqualified = []
 
-        for _, crop in crops_df.iterrows():
-            crop_name = crop["canonical_name"]
-            water_req = self._get_water_req_level(crop_name, crop)
+        for _, crop in crops.iterrows():
+            crop_name = crop["_canonical_crop"]
+            req = self._get_crop_requirements(crop, soil)
 
-            c_score, c_breakdown, c_pros, c_cons = (
-                self._calculate_multi_vector_climate_score(
-                    live_temp, live_weather, region_info, crop
-                )
+            climate_score, climate_tree, climate_pros, climate_cons = self._climate_score(
+                crop, req, region, live_temp, live_weather
+            )
+            soil_score, soil_tree, soil_pros, soil_cons = self._soil_score(
+                soil, crop, req
+            )
+            water_score, water_pros, water_cons = self._water_score(
+                farm_data, crop, req
             )
 
-            s_score, s_sub, s_pros, s_cons = self._calculate_expanded_soil_score(
-                soil_info, crop
+            agronomic = self._weighted_mean(
+                {
+                    "climate": climate_score,
+                    "soil": soil_score,
+                    "water": water_score,
+                },
+                self.AGRONOMIC_WEIGHTS,
             )
 
-            w_score, w_pros, w_cons = self._calculate_water_score(
-                water_avail, water_req
-            )
-
-            agronomic_score = round(
-                (c_score * 0.4)
-                + (s_score * 0.4)
-                + (w_score * 0.2),
-                1,
-            )
-
-            if agronomic_score < self.AGRONOMIC_PASS_THRESHOLD:
+            if agronomic < self.AGRONOMIC_PASS_THRESHOLD:
                 disqualified.append(
                     {
+                        "crop_id": crop.get("crop_id"),
                         "crop_name": crop_name,
-                        "agronomic_score": agronomic_score,
+                        "agronomic_score": agronomic,
                         "reason": (
-                            f"Agronomic score {agronomic_score:.1f}% is below "
-                            f"the minimum threshold of "
-                            f"{self.AGRONOMIC_PASS_THRESHOLD:.1f}%."
+                            f"Aggregate agronomic score {agronomic:.1f}% "
+                            f"is below the {self.AGRONOMIC_PASS_THRESHOLD:.1f}% threshold."
                         ),
                     }
                 )
                 continue
 
-            # Market data is only used AFTER agronomic viability is established.
-            state = str(region_info.get("state", self.state_scope))
-            district = str(region_info.get("district", ""))
-            try:
-                mandi = self.api_service.get_mandi_market_data(
-                    state, district, crop_name
-                )
-            except Exception as exc:
-                logger.warning("Market data unavailable for %s: %s", crop_name, exc)
-                mandi = {}
+            state = str(region.get("state", self.state_scope))
+            district = str(region.get("district", ""))
 
-            price = mandi.get("modal_price_per_qtl")
-            trend = str(mandi.get("price_trend", "STABLE")).upper()
-
-            if trend == "UPWARD":
-                market_score = 80.0
-            elif trend == "DOWNWARD":
-                market_score = 50.0
-            else:
-                market_score = 65.0
+            market = self._market_score(state, district, crop_name)
 
             final_score = round(
-                (agronomic_score * 0.7) + (market_score * 0.3),
+                agronomic * self.FINAL_WEIGHTS["agronomic"]
+                + market["score"] * self.FINAL_WEIGHTS["market"],
                 1,
             )
 
@@ -580,100 +905,108 @@ class AgronomicSuitabilityEngine:
                 band = "Highly Suitable"
             elif final_score >= 70:
                 band = "Suitable"
-            else:
+            elif final_score >= 60:
                 band = "Marginal"
+            else:
+                band = "Low Suitability"
 
-            # Keep grape explicit in the returned record.
-            is_focus_crop = crop_name == self.focus_crop
-
-            recs.append(
-                {
-                    "crop_name": crop_name,
-                    "is_focus_crop": is_focus_crop,
-                    "final_suitability_score": final_score,
-                    "agronomic_score": agronomic_score,
-                    "suitability_band": band,
-                    "water_requirement": water_req,
-                    "score_tree": {
-                        "agronomic_total": agronomic_score,
-                        "climate": {
-                            "score": c_score,
-                            "weight": 0.4,
-                            "sub_tree": c_breakdown,
-                        },
-                        "soil": {
-                            "score": s_score,
-                            "weight": 0.4,
-                            "sub_tree": s_sub,
-                        },
-                        "water": {
-                            "score": w_score,
-                            "weight": 0.2,
-                        },
-                        "market": {
-                            "score": market_score,
-                            "weight": 0.3,
-                            "modal_price": price,
-                            "trend": trend,
-                        },
+            rec = {
+                "crop_id": crop.get("crop_id"),
+                "crop_name": crop_name,
+                "is_focus_crop": crop_name == self.focus_crop,
+                "final_suitability_score": final_score,
+                "agronomic_score": agronomic,
+                "suitability_band": band,
+                "score_tree": {
+                    "agronomic_total": agronomic,
+                    "climate": {
+                        "score": climate_score,
+                        "weight": self.AGRONOMIC_WEIGHTS["climate"],
+                        "sub_tree": climate_tree,
                     },
-                    "pros": c_pros + s_pros + w_pros,
-                    "cons": c_cons + s_cons + w_cons,
-                    "penalties_applied": [],
-                }
-            )
+                    "soil": {
+                        "score": soil_score,
+                        "weight": self.AGRONOMIC_WEIGHTS["soil"],
+                        "sub_tree": soil_tree,
+                    },
+                    "water": {
+                        "score": water_score,
+                        "weight": self.AGRONOMIC_WEIGHTS["water"],
+                    },
+                    "market": {
+                        "score": market["score"],
+                        "weight": self.FINAL_WEIGHTS["market"],
+                        "modal_price": market["modal_price"],
+                        "trend": market["trend"],
+                    },
+                },
+                "pros": climate_pros + soil_pros + water_pros,
+                "cons": climate_cons + soil_cons + water_cons,
+                "variety_recommendations": [],
+            }
 
-        recs.sort(
-            key=lambda x: (
-                x["is_focus_crop"],
-                x["final_suitability_score"],
+            rec["decision_explanation"] = {
+                "why": (
+                    f"{crop_name.title()} scores {final_score:.1f}% because its climate, "
+                    f"soil, water, and market checks are combined."
+                ),
+                "strengths": climate_pros + soil_pros + water_pros,
+                "management": climate_cons + soil_cons + water_cons,
+            }
+
+            recommendations.append(rec)
+
+        # Crop data contains multiple regional records for the same crop. Keep
+        # only the highest-scoring record for each canonical crop name.
+        unique_recommendations = {}
+        for recommendation in recommendations:
+            unique_recommendations.setdefault(
+                recommendation["crop_name"], recommendation
+            )
+        recommendations = list(unique_recommendations.values())
+
+        # The focus crop is a farmer preference, so it leads when it passes
+        # agronomic screening. Its measured score is never altered.
+        recommendations.sort(
+            key=lambda r: (
+                self.prefer_focus_crop and r["is_focus_crop"],
+                r["final_suitability_score"],
             ),
             reverse=True,
         )
 
-        # Preserve an actual score ranking separately.
-        ranked_recs = sorted(
-            recs,
-            key=lambda x: x["final_suitability_score"],
-            reverse=True,
-        )
-
-        focus_record = next(
-            (r for r in recs if r["is_focus_crop"]),
-            None,
-        )
+        focus_crop_row = crops[crops["_canonical_crop"] == self.focus_crop]
+        if not focus_crop_row.empty:
+            focus_varieties = self._recommend_grape_varieties(
+                focus_crop_row.iloc[0],
+                region,
+                soil,
+                farm_data,
+                live_temp,
+                live_weather,
+            )
+            for recommendation in recommendations:
+                if recommendation["is_focus_crop"]:
+                    recommendation["variety_recommendations"] = focus_varieties
 
         return {
             "location": {
-                "district": str(region_info.get("district", "Unknown")),
-                "state": str(region_info.get("state", self.state_scope)),
-                "region_id": str(region_info.get("region_id", "")),
+                "state": str(region.get("state", self.state_scope)),
+                "district": str(region.get("district", "Unknown")),
+                "region_id": str(region.get("region_id", "")),
             },
             "soil_profile": {
-                "type": str(
-                    self._first_value(
-                        soil_info,
-                        ["soil_type", "soil_name", "texture"],
-                        "Unknown",
-                    )
-                ),
-                "soil_id": str(soil_info.get("soil_id", "")),
-                "ph": self._numeric(soil_info, ["ph", "pH"], 7.2),
-                "oc": self._numeric(
-                    soil_info,
-                    ["oc", "organic_carbon", "organic_carbon_pct"],
-                    None,
-                ),
-                "ec": self._numeric(
-                    soil_info,
-                    ["ec", "electrical_conductivity", "ec_ds_m"],
-                    None,
-                ),
+                "soil_id": str(soil.get("soil_id", "")),
+                "type": self._first(soil, ["soil_type", "soil_name", "texture"], "Unknown"),
+                "ph": self._num(soil, ["ph", "pH", "soil_ph"]),
+                "oc": self._num(soil, ["oc", "organic_carbon", "organic_carbon_pct"]),
+                "ec": self._num(soil, ["ec", "electrical_conductivity", "ec_ds_m"]),
             },
-            "water_availability": water_avail,
+            "water_availability": str(farm_data.get("water_availability", "medium")).lower(),
             "live_weather_applied": live_weather,
+            "weather_source": weather.get("source", "unknown"),
             "focus_crop": self.focus_crop,
-            "focus_crop_assessment": focus_record,
-            "primary_recommendations": ranked_recs[:top_n],
+            "primary_recommendations": recommendations[:top_n],
+            "all_recommendations": recommendations,
             "disqualified_crops": disqualified,
         }

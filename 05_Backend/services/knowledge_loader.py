@@ -72,6 +72,13 @@ class KnowledgeBaseLoader:
         str_cols = df.select_dtypes(include=["object", "string"]).columns
         df[str_cols] = df[str_cols].apply(lambda x: x.astype(str).str.strip())
 
+    # Strictly scope the region climate database to Maharashtra
+    if self.regions_df is not None and not self.regions_df.empty:
+      if "state" in self.regions_df.columns:
+        self.regions_df = self.regions_df[
+            self.regions_df["state"].astype(str).str.strip().str.lower() == "maharashtra"
+        ].copy()
+
     if self.requirements_df is not None and "crop_id" in self.requirements_df.columns:
       self.requirements_df["crop_id"] = self.requirements_df["crop_id"].replace({"grape": "crop_grape"})
 

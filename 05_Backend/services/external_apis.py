@@ -32,8 +32,33 @@ class ExternalDataService:
       self, latitude: float, longitude: float
   ) -> Dict[str, Any]:
     if not self.openweather_api_key:
-      logger.info("No OpenWeather API key provided. Using local ambient baseline.")
-      return {"temp_c": 27.5, "humidity": 60, "is_live": False}
+      try:
+        response = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": latitude,
+                "longitude": longitude,
+                "current": "temperature_2m,relative_humidity_2m",
+            },
+            timeout=5,
+        )
+        if response.status_code == 200:
+          current = response.json().get("current", {})
+          if current.get("temperature_2m") is not None:
+            logger.info("Using live weather from Open-Meteo.")
+            return {
+                "temp_c": float(current["temperature_2m"]),
+                "humidity": int(current.get("relative_humidity_2m", 60)),
+                "is_live": True,
+                "source": "Open-Meteo",
+            }
+      except requests.exceptions.Timeout:
+        logger.warning("Open-Meteo weather request timed out. Using local baseline.")
+      except Exception as exc:
+        logger.warning("Open-Meteo weather request failed: %s", exc)
+
+      logger.info("No live weather available. Using local ambient baseline.")
+      return {"temp_c": 27.5, "humidity": 60, "is_live": False, "source": "local baseline"}
 
     try:
       url = f"https://api.openweathermap.org/data/2.5/weather?lat={latitude}&lon={longitude}&appid={self.openweather_api_key}&units=metric"
@@ -45,13 +70,14 @@ class ExternalDataService:
               "temp_c": float(data["main"].get("temp", 27.5)),
               "humidity": int(data["main"].get("humidity", 60)),
               "is_live": True,
+              "source": "OpenWeather",
           }
     except requests.exceptions.Timeout:
       logger.warning("OpenWeather API request timed out. Falling back to baseline.")
     except Exception as e:
       logger.warning(f"Failed to fetch live weather data: {e}")
 
-    return {"temp_c": 27.5, "humidity": 60, "is_live": False}
+    return {"temp_c": 27.5, "humidity": 60, "is_live": False, "source": "local baseline"}
 
   def get_mandi_market_data(
       self, state: str, district: str, crop_name: str
