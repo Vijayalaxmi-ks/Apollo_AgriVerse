@@ -3,8 +3,8 @@ import {
   Droplets, Beaker, Activity, Waves, Hexagon, Leaf, AlertTriangle,
   Info, Thermometer, FlaskConical, Sparkles, RotateCcw, Check,
 } from 'lucide-react';
-import type { SimState } from './simulation';
-import { FIELDS } from './simulation';
+import type { SimState, SoilClassId } from './simulation';
+import { FIELDS, SOIL_CLASSES, getSoilClass } from './simulation';
 
 type FormulaKey = 'pam' | 'cellulose' | 'kpa' | 'crosslink' | 'other';
 type Formula = Record<FormulaKey, number>;
@@ -197,16 +197,50 @@ function HydrogelSphere({ sat }: { sat: number }) {
   );
 }
 
-export default function HydrogelPanel({ sim }: { sim: SimState }) {
-  const [selectedZone, setSelectedZone] = useState(FIELDS[0]?.id || 'A');
+export default function HydrogelPanel({
+  sim,
+  soilClass = 'alluvial',
+  setSoilClass,
+  fieldSoilMap,
+  setFieldSoil,
+  selectedField,
+  setSelectedField,
+}: {
+  sim: SimState;
+  soilClass?: SoilClassId;
+  setSoilClass?: (id: SoilClassId) => void;
+  fieldSoilMap?: Record<string, SoilClassId>;
+  setFieldSoil?: (fieldId: string, soilId: SoilClassId) => void;
+  selectedField?: string;
+  setSelectedField?: (id: string) => void;
+}) {
+  const [selectedZone, setSelectedZone] = useState(selectedField || FIELDS[0]?.id || 'A');
   const [formula, setFormula] = useState<Formula>({ ...DEFAULT_FORMULA });
   const [appliedPreset, setAppliedPreset] = useState('balanced');
   const [formulaOpen, setFormulaOpen] = useState(true);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [localSoil, setLocalSoil] = useState<SoilClassId>(soilClass);
 
   const zones = useMemo(() => buildZones(sim), [sim]);
   const active = zones.find((z) => z.id === selectedZone) || zones[0];
   const fieldMeta = FIELDS.find((f) => f.id === selectedZone) || FIELDS[0];
+
+  // Soil type follows the selected zone/field map when available
+  const activeSoilId =
+    fieldSoilMap?.[selectedZone] ||
+    (setSoilClass ? soilClass : localSoil) ||
+    'alluvial';
+  const setActiveSoil = (id: SoilClassId) => {
+    if (setFieldSoil) setFieldSoil(selectedZone, id);
+    else if (setSoilClass) setSoilClass(id);
+    else setLocalSoil(id);
+  };
+  const soilInfo = getSoilClass(activeSoilId);
+
+  const pickZone = (id: string) => {
+    setSelectedZone(id);
+    setSelectedField?.(id);
+  };
 
   const setComponent = useCallback((key: FormulaKey, value: number) => {
     setFormula((prev) => {
@@ -312,7 +346,7 @@ export default function HydrogelPanel({ sim }: { sim: SimState }) {
               <button
                 key={z.id}
                 type="button"
-                onClick={() => setSelectedZone(z.id)}
+                onClick={() => pickZone(z.id)}
                 className={`text-[10px] px-2.5 py-1 rounded-lg border font-semibold transition ${
                   selectedZone === z.id
                     ? 'bg-violet-600/30 border-violet-400/50 text-violet-100'
@@ -320,6 +354,13 @@ export default function HydrogelPanel({ sim }: { sim: SimState }) {
                 }`}
               >
                 {z.name}
+                {fieldSoilMap?.[z.id] && (
+                  <span
+                    className="ml-1 inline-block w-2 h-2 rounded-sm align-middle"
+                    style={{ background: getSoilClass(fieldSoilMap[z.id]).base }}
+                    title={getSoilClass(fieldSoilMap[z.id]).shortLabel}
+                  />
+                )}
               </button>
             ))}
           </div>
@@ -373,6 +414,71 @@ export default function HydrogelPanel({ sim }: { sim: SimState }) {
           ))}
         </div>
 
+        <div className={`${panel} p-3 border-violet-500/40`}>
+          <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+            <h2 className="text-[11px] font-bold text-white tracking-wide flex items-center gap-2">
+              <span
+                className="inline-block w-3.5 h-3.5 rounded-sm border border-white/20"
+                style={{ background: soilInfo.base }}
+              />
+              INTELLIGENT HYDROGELS · MATCHED TO {soilInfo.label.toUpperCase()}
+            </h2>
+            <div className="flex flex-wrap gap-1">
+              {SOIL_CLASSES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setActiveSoil(s.id)}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-semibold border transition ${
+                    activeSoilId === s.id
+                      ? 'border-violet-400/50 bg-violet-500/20 text-violet-100'
+                      : 'border-[#1e2d40] text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  <span className="w-2.5 h-2.5 rounded-sm" style={{ background: s.base }} />
+                  {s.shortLabel}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-500 mb-1">
+            Guidance for <span className="text-violet-300 font-semibold">{active.name}</span>
+            {' '}({soilInfo.shortLabel}). Change zone chips above to edit another field.
+          </p>
+          <p className="text-[11px] text-slate-300 leading-relaxed mb-2">{soilInfo.hydrogelTip}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] p-2.5">
+              <div className="text-[9px] text-slate-500 uppercase font-semibold">Soil water behaviour</div>
+              <div className="text-sky-300 font-semibold mt-0.5">{soilInfo.waterHolding}</div>
+              <div className="text-slate-500 text-[10px] mt-0.5">Drainage: {soilInfo.drainage}</div>
+            </div>
+            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] p-2.5">
+              <div className="text-[9px] text-slate-500 uppercase font-semibold">pH / chemistry</div>
+              <div className="text-lime-300 font-semibold mt-0.5">{soilInfo.phRange}</div>
+              <div className="text-slate-500 text-[10px] mt-0.5 leading-snug">{soilInfo.nutrientNote}</div>
+            </div>
+            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] p-2.5">
+              <div className="text-[9px] text-slate-500 uppercase font-semibold">Formula guidance</div>
+              <div className="text-violet-300 font-semibold mt-0.5">
+                {activeSoilId === 'red' || activeSoilId === 'lateritic'
+                  ? 'Drought Hold / higher PAM'
+                  : activeSoilId === 'black'
+                    ? 'Balanced · watch over-wet'
+                    : activeSoilId === 'alkaline'
+                      ? 'Salt-tolerant grade + leach'
+                      : 'Balanced all-round'}
+              </div>
+              <div className="text-slate-500 text-[10px] mt-0.5 leading-snug">
+                {activeSoilId === 'alkaline'
+                  ? 'Pair gels with gypsum & drainage plan'
+                  : activeSoilId === 'black'
+                    ? 'Short drip cycles; gels as buffer only'
+                    : 'Align recharge with scheduled irrigation'}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
           <div className={`${panel} lg:col-span-4 p-3`}>
             <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
@@ -393,7 +499,7 @@ export default function HydrogelPanel({ sim }: { sim: SimState }) {
               <div className="space-y-1.5">
                 {[
                   { l: 'Field', v: active.name },
-                  { l: 'Soil Type', v: fieldMeta.soilType },
+                  { l: 'Soil Type', v: soilInfo.shortLabel },
                   { l: 'Soil Moisture', v: `${fieldMeta.soilMoisture}%` },
                   { l: 'Degradation', v: `${active.health === 'Low' ? 'Elevated' : 'Normal'} (${degradation}%)` },
                 ].map((m) => (
@@ -749,7 +855,7 @@ export default function HydrogelPanel({ sim }: { sim: SimState }) {
               <div className="flex gap-1.5 items-start">
                 <Beaker size={11} className="text-violet-400 shrink-0 mt-0.5" />
                 <span className="text-slate-300">
-                  Eff {fieldEff}% · Release {fieldRelease} ml/day · {fieldMeta.soilType}
+                  Eff {fieldEff}% · Release {fieldRelease} ml/day · {soilInfo.shortLabel}
                 </span>
               </div>
               {active.health === 'Low' && (

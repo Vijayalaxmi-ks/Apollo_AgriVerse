@@ -370,6 +370,25 @@ export default function App() {
   const [level, setLevel] = useState<TwinLevel>('farm');
   const [selectedField, setSelectedField] = useState('B');
   const [mode, setMode] = useState<'auto' | 'manual'>('auto');
+  const [fieldSoilMap, setFieldSoilMap] = useState<Record<string, import('./simulation').SoilClassId>>({
+    A: 'red',
+    B: 'black',
+    C: 'alluvial',
+    D: 'lateritic',
+  });
+  const setFieldSoil = useCallback((fieldId: string, soilId: import('./simulation').SoilClassId) => {
+    setFieldSoilMap((prev) => ({ ...prev, [fieldId]: soilId }));
+  }, []);
+  const [fieldVarietyMap, setFieldVarietyMap] = useState<Record<string, import('./simulation').GrapeVarietyId>>({
+    A: 'sharad',
+    B: 'tas_a_ganesh',
+    C: 'thompson',
+    D: 'manjari_naveen',
+  });
+  const setFieldVariety = useCallback((fieldId: string, varietyId: import('./simulation').GrapeVarietyId) => {
+    setFieldVarietyMap((prev) => ({ ...prev, [fieldId]: varietyId }));
+  }, []);
+  const activeFieldSoil = fieldSoilMap[selectedField] || 'alluvial';
   const [liveWeather, setLiveWeather] = useState<LiveWeatherSummary | null>(null);
   const [showNotif, setShowNotif] = useState(false);
 
@@ -496,17 +515,18 @@ export default function App() {
     if (!isPlaying) return;
     // SimulationHub and DigitalTwinMap run their own intervals
     if (activeTab === 'simulation' || activeTab === 'twin') return;
+    const varietyId = fieldVarietyMap[selectedField] || 'thompson';
     const id = window.setInterval(() => {
       setSim((prev) => {
         if (prev.day >= 150) {
           setIsPlaying(false);
           return prev;
         }
-        return stepSimulation(prev);
+        return stepSimulation(prev, undefined, undefined, varietyId);
       });
     }, 600);
     return () => window.clearInterval(id);
-  }, [isPlaying, activeTab]);
+  }, [isPlaying, activeTab, fieldVarietyMap, selectedField]);
 
   return (
     <div className="flex h-screen w-screen bg-[#060B12] text-white overflow-hidden">
@@ -685,19 +705,53 @@ export default function App() {
                 setSelectedField={setSelectedField}
                 mode={mode}
                 setMode={setMode}
+                fieldSoilMap={fieldSoilMap}
+                setFieldSoil={setFieldSoil}
+                fieldVarietyMap={fieldVarietyMap}
+                setFieldVariety={setFieldVariety}
               />
             )}
-            {activeTab === 'lifecycle' && <LifecyclePanel sim={sim} />}
+            {activeTab === 'lifecycle' && (
+              <LifecyclePanel
+                sim={sim}
+                varietyId={fieldVarietyMap[selectedField] || 'thompson'}
+              />
+            )}
             {activeTab === 'simulation' && (
               <SimulationPage sim={sim} setSim={setSim} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
             )}
             {activeTab === 'predictions' && <PredictionsPanel sim={sim} />}
             {activeTab === 'alerts' && <AlertsPage sim={sim} />}
             {activeTab === 'weather' && <WeatherPanel onLiveWeather={setLiveWeather} />}
-            {activeTab === 'soil' && <SoilPanel />}
-            {activeTab === 'hydrogels' && <HydrogelPanel sim={sim} />}
+            {activeTab === 'soil' && (
+              <SoilPanel
+                soilClass={activeFieldSoil}
+                setSoilClass={(id) => setFieldSoil(selectedField, id)}
+                fieldSoilMap={fieldSoilMap}
+                setFieldSoil={setFieldSoil}
+                selectedField={selectedField}
+                setSelectedField={setSelectedField}
+              />
+            )}
+            {activeTab === 'hydrogels' && (
+              <HydrogelPanel
+                sim={sim}
+                soilClass={activeFieldSoil}
+                setSoilClass={(id) => setFieldSoil(selectedField, id)}
+                fieldSoilMap={fieldSoilMap}
+                setFieldSoil={setFieldSoil}
+                selectedField={selectedField}
+                setSelectedField={setSelectedField}
+              />
+            )}
             {activeTab === 'mulching' && <MulchingPanel sim={sim} />}
-            {activeTab === 'analytics' && <AnalyticsPanel sim={sim} />}
+            {activeTab === 'analytics' && (
+              <AnalyticsPanel
+                sim={sim}
+                fieldVarietyMap={fieldVarietyMap}
+                fieldSoilMap={fieldSoilMap}
+              />
+            )}
             {activeTab === 'reports' && <ReportsPanel sim={sim} />}
             {activeTab === 'settings' && (
               <SettingsPanel

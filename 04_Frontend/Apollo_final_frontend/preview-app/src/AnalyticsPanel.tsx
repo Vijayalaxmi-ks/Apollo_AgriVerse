@@ -4,14 +4,22 @@ import {
   PieChart, BarChart2, Leaf, Cloud, Sun, Wind, Thermometer,
   Droplets, Zap, FileText, Activity, AlertTriangle,
 } from 'lucide-react';
-import type { SimState } from './simulation';
-import { FIELDS } from './simulation';
+import type { SimState, SoilClassId, GrapeVarietyId } from './simulation';
+import { FIELDS, getGrapeVariety, getSoilClass } from './simulation';
 import {
   getCities, getAllCropsFlat, SEASONS, getAllStates,
   evaluateMarketArbitrage, getMarketTableForCrop,
   buildPriceTrendSeries, coreCommodity,
   generateSeasonAnalytics, seasonAfterHarvest, computeFieldConstraints,
 } from './marketData';
+
+const VARIETY_CROP_LABEL: Record<string, string> = {
+  thompson: 'Grape (Thompson Seedless)',
+  tas_a_ganesh: 'Grape (Thompson Seedless)',
+  sharad: 'Grape (Sharad Seedless / Black)',
+  manjari_naveen: 'Grape (Thompson Seedless)',
+  manjari_shyama: 'Grape (Sharad Seedless / Black)',
+};
 
 function formatInr(n: number): string {
   if (n >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
@@ -161,9 +169,23 @@ function MultiLinePrices({ series }: { series: { name: string; color: string; va
 }
 
 
-function SafeAnalyticsPanel({ sim }: { sim: SimState }) {
+function SafeAnalyticsPanel({
+  sim,
+  fieldVarietyMap,
+  fieldSoilMap,
+}: {
+  sim: SimState;
+  fieldVarietyMap?: Record<string, GrapeVarietyId>;
+  fieldSoilMap?: Record<string, SoilClassId>;
+}) {
   try {
-    return <AnalyticsPanelInner sim={sim} />;
+    return (
+      <AnalyticsPanelInner
+        sim={sim}
+        fieldVarietyMap={fieldVarietyMap}
+        fieldSoilMap={fieldSoilMap}
+      />
+    );
   } catch (err) {
     console.error('AnalyticsPanel error', err);
     return (
@@ -178,7 +200,15 @@ function SafeAnalyticsPanel({ sim }: { sim: SimState }) {
   }
 }
 
-function AnalyticsPanelInner({ sim }: { sim: SimState }) {
+function AnalyticsPanelInner({
+  sim,
+  fieldVarietyMap = {},
+  fieldSoilMap = {},
+}: {
+  sim: SimState;
+  fieldVarietyMap?: Record<string, GrapeVarietyId>;
+  fieldSoilMap?: Record<string, SoilClassId>;
+}) {
 
   const states = getAllStates();
   const [state, setState] = useState('Maharashtra');
@@ -189,7 +219,15 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
   const [harvestNotice, setHarvestNotice] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
   const cities = getCities(state);
-  const crops = getAllCropsFlat();
+  // Grape varieties always listed first (priority), then other crops
+  const crops = useMemo(() => {
+    const all = getAllCropsFlat();
+    const grapes = all.filter((c) => /grape/i.test(c));
+    const others = all.filter((c) => !/grape/i.test(c));
+    const thompson = grapes.filter((c) => /thompson/i.test(c));
+    const otherGrapes = grapes.filter((c) => !/thompson/i.test(c));
+    return [...thompson, ...otherGrapes, ...others];
+  }, []);
 
   const farmAcres = FIELDS.reduce((s, f) => s + f.acres, 0);
 
@@ -214,10 +252,27 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
     return () => clearTimeout(t);
   }, [harvestNotice]);
 
-  // Per-field season analytics — driven by live weather + field constraints
+  // Per-field season analytics — driven by SELECTED CROP + weather + soil (+ grape variety when crop is grape)
   const fieldAnalytics = useMemo(() => {
+    const isGrapeCrop = /grape/i.test(crop);
     return FIELDS.map((f) => {
       const healthIndex = Math.round(f.health * 0.55 + sim.healthIndex * 0.45);
+      const varietyId = fieldVarietyMap[f.id] || 'thompson';
+      const soilClass = fieldSoilMap[f.id] || 'alluvial';
+      const varietyInfo = getGrapeVariety(varietyId);
+      const soilInfo = getSoilClass(soilClass);
+      // Selected crop filter is the source of truth for yield, price, cost and profit.
+      const displayVariety = isGrapeCrop
+        ? (crop.match(/\(([^)]+)\)/)?.[1]?.trim() || varietyInfo.label)
+        : crop.split('(')[0].trim();
+      // Map selected grape crop name → varietyId for agronomy cost model
+      const selectedVarietyId = isGrapeCrop
+        ? (/sharad|black/i.test(crop) ? 'sharad'
+          : /tas|ganesh/i.test(crop) ? 'tas_a_ganesh'
+          : /flame|red/i.test(crop) ? 'sharad'
+          : /sonaka|manik|naveen/i.test(crop) ? 'manjari_naveen'
+          : 'thompson')
+        : undefined;
       const env = {
         temperature: sim.env.temperature,
         humidity: sim.env.humidity,
@@ -225,7 +280,7 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
         sunlight: sim.env.sunlight,
         windSpeed: sim.env.windSpeed,
         soilMoisture: f.soilMoisture,
-        soilType: f.soilType,
+        soilType: soilInfo.label,
         stressHeat: sim.stressHeat,
         stressWater: sim.stressWater,
         stressNutrient: sim.stressNutrient,
@@ -235,28 +290,35 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
       };
       const a = generateSeasonAnalytics({
         season,
-        crop,
+        crop, // always the UI-selected crop
         state,
         city,
         acres: f.acres,
         healthIndex,
         env,
+        varietyId: selectedVarietyId,
+        soilClass,
       });
       const ha = Math.max(0.01, f.acres * 0.404686);
       const c = a.constraints || computeFieldConstraints(env);
       return {
         id: f.id,
         name: f.name,
-        variety: f.variety,
+        variety: displayVariety,
+        varietyId: selectedVarietyId,
+        soilClass,
+        soilLabel: soilInfo.label,
         acres: f.acres,
         hectares: +ha.toFixed(3),
         health: f.health,
-        soilType: f.soilType,
+        soilType: soilInfo.label,
         soilMoisture: f.soilMoisture,
         totalYield: a.totalYield,
         revenue: a.revenue,
         profit: a.profit,
         productionCost: a.productionCost,
+        inputCosts: a.inputCosts,
+        overhead: a.overhead,
         margin: a.margin,
         yearRevenue: a.yearRevenue,
         yearProfit: a.yearProfit,
@@ -305,6 +367,8 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
     sim.stressNutrient,
     sim.weather,
     sim.mulchCoverage,
+    fieldVarietyMap,
+    fieldSoilMap,
   ]);
 
   // Farm totals across all 4 fields
@@ -395,25 +459,30 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
   const gradeB = +(totalYield * 0.3).toFixed(2);
   const gradeC = +(totalYield * 0.1).toFixed(2);
 
-  // Irrigation share rises in Summer; labor higher in Kharif
+  // Seeds / Technology / Chemicals from agronomy model (+ overhead)
   const costParts = useMemo(() => {
-    const irrigBoost = season.includes('Summer') ? 4 : 0;
-    const laborBoost = season.includes('Kharif') ? 3 : 0;
-    const labor = 28 + laborBoost;
-    const irrig = 14 + irrigBoost;
-    const fert = 22;
-    const mulch = 16;
-    const pest = 10;
-    const others = Math.max(6, 100 - labor - fert - mulch - irrig - pest);
+    const list = activeField ? [activeField] : fieldAnalytics;
+    const seeds = list.reduce((s, f) => s + (f.inputCosts?.seeds || 0), 0);
+    const technology = list.reduce((s, f) => s + (f.inputCosts?.technology || 0), 0);
+    const chemicals = list.reduce((s, f) => s + (f.inputCosts?.chemicals || 0), 0);
+    const otherInputs = list.reduce((s, f) => s + (f.inputCosts?.other || 0), 0);
+    const overhead = list.reduce((s, f) => s + (f.overhead || 0), 0);
+    const total = Math.max(1, seeds + technology + chemicals + otherInputs + overhead);
+    const row = (label: string, value: number, color: string) => ({
+      label,
+      pct: +((value / total) * 100).toFixed(1),
+      color,
+      value: formatInr(value),
+      raw: value,
+    });
     return [
-      { label: 'Labor', pct: labor, color: '#8b5cf6', value: formatInr(productionCost * (labor / 100)) },
-      { label: 'Fertilizers', pct: fert, color: '#3b82f6', value: formatInr(productionCost * (fert / 100)) },
-      { label: 'Mulching Paper', pct: mulch, color: '#eab308', value: formatInr(productionCost * (mulch / 100)) },
-      { label: 'Irrigation', pct: irrig, color: '#f97316', value: formatInr(productionCost * (irrig / 100)) },
-      { label: 'Pesticides', pct: pest, color: '#ef4444', value: formatInr(productionCost * (pest / 100)) },
-      { label: 'Others', pct: others, color: '#06b6d4', value: formatInr(productionCost * (others / 100)) },
+      row('Seeds / planting', seeds, '#a78bfa'),
+      row('Technology', technology, '#38bdf8'),
+      row('Chemicals', chemicals, '#f87171'),
+      row('Other inputs', otherInputs, '#fbbf24'),
+      row('Ops overhead', overhead, '#94a3b8'),
     ];
-  }, [season, productionCost]);
+  }, [activeField, fieldAnalytics]);
 
   // Zones = full field economics, sorted by profit
   const zones = [...fieldAnalytics]
@@ -446,8 +515,11 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
     return buildPriceTrendSeries(modal, names.length ? names : fallback);
   }, [marketRows, priceSummary?.modal_price_quintal, crop]);
 
-  const panel = 'bg-[#121a27] rounded-xl border border-[#1e2d40]';
-  const selectCls = 'bg-[#0b131e] border border-[#1e2d40] rounded-lg text-[11px] text-slate-200 px-2 py-1.5 outline-none focus:border-violet-500/50';
+  const panel = 'bg-[#121a27] rounded-2xl border border-[#1e2d40] shadow-sm';
+  const selectCls = 'bg-[#0b131e] border border-[#1e2d40] rounded-lg text-[13px] text-slate-100 px-3 py-2.5 outline-none focus:border-violet-500/50';
+  const sectionTitle = 'text-base md:text-lg font-bold text-white tracking-tight';
+  const sectionSub = 'text-[13px] text-slate-300 mt-1 leading-relaxed';
+  const cardLabel = 'text-[12px] font-semibold text-slate-300 uppercase tracking-wide';
 
   const reportScopeLabel =
     selectedFieldId === 'all' ? 'All 4 Fields (Farm)' : `Field ${selectedFieldId}`;
@@ -531,19 +603,25 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
 
   return (
     <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden bg-[#0b131e]">
-      <div className="p-3 space-y-2.5">
-        <div>
-          <h1 className="text-base font-bold tracking-wide">
-            <span className="text-violet-300">ANALYTICS & INSIGHTS</span>
+      <div className="p-5 md:p-7 space-y-6 max-w-[1400px]">
+        {/* Page header */}
+        <div className="pb-3 border-b border-[#1e2d40]">
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white">
+            Analytics & Insights
           </h1>
-          <p className="text-[10px] text-slate-500">Real-time Data · Smart Analytics · Profitable Decisions · Agmarknet integrated</p>
+          <p className="text-[14px] md:text-[15px] text-slate-300 mt-2 leading-relaxed">
+            Real-time farm data · Cost & profit by field · Variety · Soil · Weather · Agmarknet prices
+          </p>
         </div>
 
         {/* Filters */}
-        <div className={`${panel} p-2.5 flex flex-wrap items-end gap-2`}>
+        <section className={`${panel} p-5 md:p-6`}>
+          <div className={sectionTitle}>Filters</div>
+          <p className={sectionSub}>Choose location, crop and season for market-linked analytics</p>
+          <div className="mt-4 flex flex-wrap items-end gap-4">
           <div>
-            <div className="text-[9px] text-slate-500 mb-0.5 flex items-center gap-1"><MapPin size={10} /> State / City</div>
-            <div className="flex gap-1">
+            <div className="text-[11px] text-slate-400 mb-1 flex items-center gap-1"><MapPin size={12} /> State / City</div>
+            <div className="flex gap-1.5">
               <select className={selectCls} value={state} onChange={(e) => { setState(e.target.value); setCity(getCities(e.target.value)[0] || ''); }}>
                 {states.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -553,54 +631,66 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
             </div>
           </div>
           <div>
-            <div className="text-[9px] text-slate-500 mb-0.5 flex items-center gap-1"><Leaf size={10} /> Crop</div>
-            <select className={selectCls + ' max-w-[200px]'} value={crop} onChange={(e) => setCrop(e.target.value)}>
-              {crops.map((c) => <option key={c} value={c}>{c}</option>)}
+            <div className="text-[11px] text-slate-400 mb-1 flex items-center gap-1"><Leaf size={12} /> Crop</div>
+            <select className={selectCls + ' max-w-[260px]'} value={crop} onChange={(e) => setCrop(e.target.value)}>
+              <optgroup label="Grapes (priority)">
+                {crops.filter((c) => /grape/i.test(c)).map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Other crops">
+                {crops.filter((c) => !/grape/i.test(c)).map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </optgroup>
             </select>
           </div>
           <div>
-            <div className="text-[9px] text-slate-500 mb-0.5 flex items-center gap-1"><Calendar size={10} /> Season</div>
+            <div className="text-[11px] text-slate-400 mb-1 flex items-center gap-1"><Calendar size={12} /> Season</div>
             <select className={selectCls} value={season} onChange={(e) => setSeason(e.target.value)}>
               {SEASONS.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
-          <div className="text-[10px] text-slate-400 px-2 py-1.5 rounded-lg border border-[#1e2d40] bg-[#0b131e]">
+          <div className="text-[12px] text-slate-300 px-3 py-2 rounded-lg border border-[#1e2d40] bg-[#0b131e]">
             {dateRange}
           </div>
           {sim.stage === 'harvest' && (
-            <div className="text-[10px] text-amber-300 px-2 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10">
+            <div className="text-[12px] text-amber-300 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10">
               🧺 Harvest stage · {sim.stageProgress}%
             </div>
           )}
-          <button type="button" className="ml-auto text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-500">
+          <button type="button" className="ml-auto text-[12px] font-semibold px-4 py-2 rounded-lg bg-violet-600 text-white hover:bg-violet-500">
             Apply
           </button>
           <button
             type="button"
             onClick={downloadReport}
-            className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-[#1e2d40] text-slate-300 hover:border-slate-500 flex items-center gap-1"
+            className="text-[12px] font-semibold px-4 py-2 rounded-lg border border-[#1e2d40] text-slate-200 hover:border-slate-500 flex items-center gap-1.5"
           >
-            <Download size={12} /> Export Report
+            <Download size={14} /> Export Report
           </button>
-        </div>
+          </div>
+        </section>
 
         {harvestNotice && (
-          <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200 flex items-center gap-2">
-            <Activity size={14} className="shrink-0" />
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-[13px] text-emerald-200 flex items-center gap-2">
+            <Activity size={16} className="shrink-0" />
             {harvestNotice}
           </div>
         )}
 
-        {/* Field / farm selector — analytics scoped to 4 digital-twin fields */}
-        <div className={`${panel} p-2.5 flex flex-wrap items-center gap-2`}>
-          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mr-1">Farm / Fields</div>
+        {/* Field / farm selector */}
+        <section className={`${panel} p-5 md:p-6`}>
+          <div className={sectionTitle}>Farm / Fields</div>
+          <p className={sectionSub}>Scope KPIs, costs and profit to one field or the whole farm</p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => setSelectedFieldId('all')}
-            className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition ${
+            className={`text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition ${
               selectedFieldId === 'all'
-                ? 'bg-violet-600/30 border-violet-500/60 text-violet-200'
-                : 'border-[#1e2d40] text-slate-400 hover:border-slate-500'
+                ? 'bg-violet-600/30 border-violet-500/60 text-violet-100'
+                : 'border-[#1e2d40] text-slate-300 hover:border-slate-500'
             }`}
           >
             All 4 Fields · {farmTotals.acres.toFixed(2)} ac · {formatInr(farmTotals.revenue)}
@@ -610,100 +700,115 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
               key={f.id}
               type="button"
               onClick={() => setSelectedFieldId(f.id)}
-              className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition ${
+              className={`text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition ${
                 selectedFieldId === f.id
-                  ? 'bg-violet-600/30 border-violet-500/60 text-violet-200'
-                  : 'border-[#1e2d40] text-slate-400 hover:border-slate-500'
+                  ? 'bg-violet-600/30 border-violet-500/60 text-violet-100'
+                  : 'border-[#1e2d40] text-slate-300 hover:border-slate-500'
               }`}
             >
               {f.name}
-              <span className="ml-1 text-[9px] text-slate-500 font-normal">
+              <span className="ml-1.5 text-[11px] text-slate-400 font-normal">
                 {f.acres} ac · {formatInr(f.profit)} profit
               </span>
             </button>
           ))}
-          <div className="ml-auto text-[9px] text-slate-500">
+          <div className="ml-auto text-[12px] text-slate-400">
             Top profit: <span className="text-emerald-400 font-semibold">{farmTotals.best?.name}</span>
             {' · '}{formatInr(farmTotals.best?.profit ?? 0)}
           </div>
-        </div>
+          </div>
+        </section>
 
-        {/* Season KPI strip — changes with field + season */}
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
+        {/* Season KPI strip */}
+        <section>
+          <div className="mb-3">
+            <div className={sectionTitle}>Season performance</div>
+            <p className={sectionSub}>Yield, revenue, cost and profit for the selected scope</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
           {[
-            { icon: <Leaf size={16} className="text-violet-400" />, t: 'TOTAL YIELD', v: `${totalYield} tons`, s: `${yieldPerHa} t/ha · ${selectedFieldId === 'all' ? '4 fields' : `Field ${selectedFieldId}`}`, sc: 'text-violet-300' },
-            { icon: <DollarSign size={16} className="text-emerald-400" />, t: 'MONEY EARNED', v: formatInr(revenue), s: `${formatInr(revenuePerHa)}/ha · ${vsRevenue >= 0 ? '↑' : '↓'} ${Math.abs(vsRevenue)}%`, sc: vsRevenue >= 0 ? 'text-emerald-400' : 'text-rose-400' },
-            { icon: <TrendingUp size={16} className="text-amber-400" />, t: 'ESTIMATED PROFIT', v: formatInr(profit), s: `${formatInr(profitPerHa)}/ha · ${vsProfit >= 0 ? '↑' : '↓'} ${Math.abs(vsProfit)}%`, sc: vsProfit >= 0 ? 'text-emerald-400' : 'text-rose-400' },
-            { icon: <PieChart size={16} className="text-sky-400" />, t: 'PRODUCTION COST', v: formatInr(productionCost), s: `${formatInr(costPerHa)}/ha · ${vsCost >= 0 ? '↑' : '↓'} ${Math.abs(vsCost)}%`, sc: vsCost <= 0 ? 'text-emerald-400' : 'text-amber-400' },
-            { icon: <BarChart2 size={16} className="text-fuchsia-400" />, t: 'PROFIT MARGIN', v: `${margin}%`, s: `${acres.toFixed(2)} ac · ${hectares.toFixed(2)} ha`, sc: 'text-emerald-400' },
+            { icon: <Leaf size={18} className="text-violet-400" />, t: 'TOTAL YIELD', v: `${totalYield} tons`, s: `${yieldPerHa} t/ha · ${selectedFieldId === 'all' ? '4 fields' : `Field ${selectedFieldId}`}`, sc: 'text-violet-300' },
+            { icon: <DollarSign size={18} className="text-emerald-400" />, t: 'MONEY EARNED', v: formatInr(revenue), s: `${formatInr(revenuePerHa)}/ha · ${vsRevenue >= 0 ? '↑' : '↓'} ${Math.abs(vsRevenue)}%`, sc: vsRevenue >= 0 ? 'text-emerald-400' : 'text-rose-400' },
+            { icon: <TrendingUp size={18} className="text-amber-400" />, t: 'ESTIMATED PROFIT', v: formatInr(profit), s: `${formatInr(profitPerHa)}/ha · ${vsProfit >= 0 ? '↑' : '↓'} ${Math.abs(vsProfit)}%`, sc: vsProfit >= 0 ? 'text-emerald-400' : 'text-rose-400' },
+            { icon: <PieChart size={18} className="text-sky-400" />, t: 'PRODUCTION COST', v: formatInr(productionCost), s: `${formatInr(costPerHa)}/ha · ${vsCost >= 0 ? '↑' : '↓'} ${Math.abs(vsCost)}%`, sc: vsCost <= 0 ? 'text-emerald-400' : 'text-amber-400' },
+            { icon: <BarChart2 size={18} className="text-fuchsia-400" />, t: 'PROFIT MARGIN', v: `${margin}%`, s: `${acres.toFixed(2)} ac · ${hectares.toFixed(2)} ha`, sc: 'text-emerald-400' },
           ].map((k) => (
-            <div key={k.t} className={`${panel} px-2.5 py-2`}>
-              <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-semibold uppercase">{k.icon}{k.t}</div>
-              <div className="text-lg font-bold text-white mt-0.5">{k.v}</div>
-              <div className={`text-[10px] ${k.sc}`}>{k.s}</div>
+            <div key={k.t} className={`${panel} px-4 py-4`}>
+              <div className={`flex items-center gap-2 ${cardLabel}`}>{k.icon}{k.t}</div>
+              <div className="text-2xl font-bold text-white mt-2 tracking-tight">{k.v}</div>
+              <div className={`text-[13px] mt-1.5 ${k.sc}`}>{k.s}</div>
             </div>
           ))}
-        </div>
+          </div>
+        </section>
 
-        {/* This year forecast — total money earning & profit */}
-        <div className={`${panel} p-3 border border-violet-500/20`}>
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+        {/* This year forecast */}
+        <section className={`${panel} p-5 md:p-6 border border-violet-500/25`}>
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
             <div>
-              <div className="text-[11px] font-bold text-violet-200">THIS YEAR FORECAST · Total Earnings & Profit</div>
-              <div className="text-[9px] text-slate-500">
+              <div className={sectionTitle}>This year forecast</div>
+              <p className={sectionSub}>
                 {selectedFieldId === 'all' ? 'Sum of 4 fields' : `Field ${selectedFieldId} only`}
-                {' · '}seasonal market models + live farm health
+                {' · '}seasonal models + live farm health
                 {profile?.harvestMonths ? ` · ${profile.harvestMonths} harvest` : ''}
-              </div>
+              </p>
             </div>
-            <span className="text-[9px] px-2 py-0.5 rounded bg-violet-500/15 text-violet-300 border border-violet-500/30">API data · Agmarknet scaled</span>
+            <span className="text-[11px] px-2.5 py-1 rounded-lg bg-violet-500/15 text-violet-200 border border-violet-500/30 font-medium">
+              API data · Agmarknet
+            </span>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
-            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2.5 py-2">
-              <div className="text-[9px] text-slate-500 uppercase font-semibold">Year Yield</div>
-              <div className="text-base font-bold text-white">{yearYield} tons</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+            <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] px-3 py-2.5">
+              <div className={cardLabel}>Year Yield</div>
+              <div className="text-lg font-bold text-white mt-1">{yearYield} tons</div>
             </div>
-            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2.5 py-2">
-              <div className="text-[9px] text-slate-500 uppercase font-semibold">Year Revenue</div>
-              <div className="text-base font-bold text-emerald-300">{formatInr(yearRevenue)}</div>
+            <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] px-3 py-2.5">
+              <div className={cardLabel}>Year Revenue</div>
+              <div className="text-lg font-bold text-emerald-300 mt-1">{formatInr(yearRevenue)}</div>
             </div>
-            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2.5 py-2">
-              <div className="text-[9px] text-slate-500 uppercase font-semibold">Year Profit</div>
-              <div className="text-base font-bold text-amber-300">{formatInr(yearProfit)}</div>
+            <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] px-3 py-2.5">
+              <div className={cardLabel}>Year Profit</div>
+              <div className="text-lg font-bold text-amber-300 mt-1">{formatInr(yearProfit)}</div>
             </div>
-            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2.5 py-2">
-              <div className="text-[9px] text-slate-500 uppercase font-semibold">Revenue / ha</div>
-              <div className="text-base font-bold text-emerald-200">{formatInr(yearRevenuePerHa)}</div>
+            <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] px-3 py-2.5">
+              <div className={cardLabel}>Revenue / ha</div>
+              <div className="text-lg font-bold text-emerald-200 mt-1">{formatInr(yearRevenuePerHa)}</div>
             </div>
-            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2.5 py-2">
-              <div className="text-[9px] text-slate-500 uppercase font-semibold">Profit / ha</div>
-              <div className="text-base font-bold text-amber-200">{formatInr(yearProfitPerHa)}</div>
+            <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] px-3 py-2.5">
+              <div className={cardLabel}>Profit / ha</div>
+              <div className="text-lg font-bold text-amber-200 mt-1">{formatInr(yearProfitPerHa)}</div>
             </div>
-            <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2.5 py-2">
-              <div className="text-[9px] text-slate-500 uppercase font-semibold">Year Margin</div>
-              <div className="text-base font-bold text-fuchsia-300">{yearMargin}%</div>
-              <div className="text-[9px] text-slate-500">{hectares.toFixed(2)} ha farm</div>
+            <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] px-3 py-2.5">
+              <div className={cardLabel}>Year Margin</div>
+              <div className="text-lg font-bold text-fuchsia-300 mt-1">{yearMargin}%</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">{hectares.toFixed(2)} ha farm</div>
             </div>
           </div>
-          <div className="mt-2 text-[9px] text-slate-500 leading-snug">{profile?.insight}</div>
-        </div>
+          {profile?.insight && (
+            <div className="mt-3 text-[12px] text-slate-400 leading-relaxed border-t border-[#1e2d40] pt-3">{profile.insight}</div>
+          )}
+        </section>
 
         {/* Charts row 1 */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
-          <div className={`${panel} p-3 lg:col-span-5`}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="text-[10px] font-bold text-slate-300">YIELD TREND</div>
-              <span className="text-[9px] text-slate-500 border border-[#1e2d40] rounded px-1.5 py-0.5">Monthly</span>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <div className={`${panel} p-5 lg:col-span-5`}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className={sectionTitle}>Yield trend</div>
+                <p className={sectionSub}>Monthly actual vs estimated</p>
+              </div>
+              <span className="text-[12px] text-slate-300 border border-[#1e2d40] rounded-lg px-2.5 py-1">Monthly</span>
             </div>
-            <div className="flex gap-3 text-[8px] text-slate-500 mb-1">
-              <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-violet-400" /> Actual Yield</span>
-              <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-emerald-400 border-dashed" /> Estimated</span>
+            <div className="flex gap-4 text-[12px] text-slate-400 mb-2">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-violet-400" /> Actual Yield</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-emerald-400 border-dashed" /> Estimated</span>
             </div>
             <LineAreaChart actual={yieldActual.slice(0, 6)} estimated={yieldEst.slice(0, 6)} labels={months.slice(0, 6)} />
           </div>
 
-          <div className={`${panel} p-3 lg:col-span-3`}>
-            <div className="text-[10px] font-bold text-slate-300 mb-2">YIELD DISTRIBUTION</div>
+          <div className={`${panel} p-5 lg:col-span-3`}>
+            <div className={sectionTitle}>Yield distribution</div>
+            <p className={`${sectionSub} mb-3`}>Grade mix of harvested fruit</p>
             <Donut
               center={`${totalYield}`}
               sub="tons"
@@ -715,18 +820,21 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
             />
           </div>
 
-          <div className={`${panel} p-3 lg:col-span-4`}>
+          <div className={`${panel} p-4 lg:col-span-4`}>
             <div className="flex items-center justify-between mb-2">
-              <div className="text-[10px] font-bold text-slate-300">MARKET PRICES (Live · Agmarknet)</div>
-              <span className="text-[9px] text-violet-400">View Market</span>
+              <div>
+                <div className={sectionTitle}>Market prices</div>
+                <p className={sectionSub}>Live · Agmarknet linked</p>
+              </div>
+              <span className="text-[11px] text-violet-300 font-medium">View Market</span>
             </div>
-            <table className="w-full text-[10px]">
+            <table className="w-full text-[12px]">
               <thead>
-                <tr className="text-slate-500 border-b border-[#1e2d40]">
-                  <th className="text-left py-1 font-medium">Variety / Market</th>
-                  <th className="text-right py-1 font-medium">₹/qtl</th>
-                  <th className="text-right py-1 font-medium">₹/kg</th>
-                  <th className="text-right py-1 font-medium">7D</th>
+                <tr className="text-slate-400 border-b border-[#1e2d40]">
+                  <th className="text-left py-1.5 font-semibold">Variety / Market</th>
+                  <th className="text-right py-1.5 font-semibold">₹/qtl</th>
+                  <th className="text-right py-1.5 font-semibold">₹/kg</th>
+                  <th className="text-right py-1.5 font-semibold">7D</th>
                 </tr>
               </thead>
               <tbody>
@@ -754,30 +862,68 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
         </div>
 
         {/* Charts row 2 */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
-          <div className={`${panel} p-3 lg:col-span-5`}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="text-[10px] font-bold text-slate-300">REVENUE & PROFIT TREND</div>
-              <span className="text-[9px] text-slate-500 border border-[#1e2d40] rounded px-1.5 py-0.5">Monthly · ₹ Lakhs</span>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <div className={`${panel} p-5 lg:col-span-5`}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className={sectionTitle}>Revenue & profit trend</div>
+                <p className={sectionSub}>Monthly comparison in ₹ lakhs</p>
+              </div>
+              <span className="text-[12px] text-slate-300 border border-[#1e2d40] rounded-lg px-2.5 py-1">Monthly</span>
             </div>
-            <div className="flex gap-3 text-[8px] text-slate-500 mb-1">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-violet-600" /> Revenue</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500" /> Profit</span>
+            <div className="flex gap-4 text-[12px] text-slate-400 mb-2">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-violet-600" /> Revenue</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Profit</span>
             </div>
             <BarPairChart revenue={revBars.slice(0, 6)} profit={profitBars.slice(0, 6)} labels={months.slice(0, 6)} />
           </div>
 
-          <div className={`${panel} p-3 lg:col-span-3`}>
-            <div className="text-[10px] font-bold text-slate-300 mb-2">COST BREAKDOWN</div>
-            <Donut center={formatInr(productionCost).replace('₹', '')} sub="cost" segments={costParts.map((c) => ({ pct: c.pct, color: c.color, label: c.label, value: `${c.pct}%` }))} />
+          <div className={`${panel} p-5 lg:col-span-3`}>
+            <div className={sectionTitle}>Cost breakdown</div>
+            <p className={`${sectionSub} mb-3`}>Seeds · technology · chemicals · total</p>
+            <Donut
+              center={formatInr(productionCost).replace('₹', '')}
+              sub="total"
+              segments={costParts.map((c) => ({
+                pct: c.pct,
+                color: c.color,
+                label: c.label,
+                value: `${c.pct}%`,
+              }))}
+            />
+            <div className="mt-3 space-y-2">
+              {costParts.map((c) => (
+                <div key={c.label} className="flex items-center justify-between text-[13px]">
+                  <span className="flex items-center gap-2 text-slate-300">
+                    <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: c.color }} />
+                    {c.label}
+                  </span>
+                  <span className="text-white font-semibold tabular-nums">{c.value}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between text-[14px] pt-2 border-t border-[#1e2d40]">
+                <span className="text-emerald-300 font-bold">Total required</span>
+                <span className="text-emerald-300 font-bold tabular-nums">{formatInr(productionCost)}</span>
+              </div>
+              <div className="flex items-center justify-between text-[14px]">
+                <span className="text-violet-300 font-bold">Predicted profit</span>
+                <span className="text-violet-300 font-bold tabular-nums">{formatInr(profit)}</span>
+              </div>
+              {activeField && (
+                <div className="text-[12px] text-slate-400 pt-1">
+                  {activeField.name} · {activeField.variety} · {activeField.soilLabel}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className={`${panel} p-3 lg:col-span-4`}>
-            <div className="text-[10px] font-bold text-slate-300 mb-1">PRICE TREND (Last 30 Days)</div>
-            <div className="flex flex-wrap gap-2 text-[8px] text-slate-500 mb-1">
+          <div className={`${panel} p-5 lg:col-span-4`}>
+            <div className={sectionTitle}>Price trend</div>
+            <p className={`${sectionSub} mb-3`}>Last 30 days · market varieties</p>
+            <div className="flex flex-wrap gap-3 text-[12px] text-slate-400 mb-2">
               {priceSeries.map((s) => (
-                <span key={s.name} className="inline-flex items-center gap-1">
-                  <span className="w-2 h-0.5" style={{ background: s.color }} />{s.name}
+                <span key={s.name} className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-0.5" style={{ background: s.color }} />{s.name}
                 </span>
               ))}
             </div>
@@ -785,209 +931,279 @@ function AnalyticsPanelInner({ sim }: { sim: SimState }) {
           </div>
         </div>
 
-        {/* Bottom — items-start avoids empty stretch space in shorter panels */}
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-2 items-start">
-          <div className={`${panel} p-3 xl:col-span-2 flex flex-col items-center self-start`}>
-            <div className="text-[9px] text-slate-500 font-semibold uppercase mb-1">Farm Performance</div>
-            <div className="relative w-24 h-24">
-              <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="36" stroke="#1e2d40" strokeWidth="8" fill="none" />
-                <circle cx="50" cy="50" r="36" stroke="#8b5cf6" strokeWidth="8" fill="none"
-                  strokeDasharray={2 * Math.PI * 36}
-                  strokeDashoffset={2 * Math.PI * 36 * (1 - perfScore / 100)}
-                  strokeLinecap="round" />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-2xl font-bold text-white leading-none">{perfScore}</span>
-                <span className="text-[8px] text-slate-500">/100</span>
-              </div>
-            </div>
-            <div className="text-emerald-400 text-[11px] font-bold mt-1">{perfScore >= 80 ? 'Excellent' : 'Good'}</div>
-            <div className="text-[8px] text-emerald-400/80">↑ 8% vs last 7 days</div>
+        {/* Bottom summary — earnings table full width on top; weather lower */}
+        <section className="space-y-5">
+          <div>
+            <div className={sectionTitle}>Summary dashboard</div>
+            <p className={sectionSub}>Field earnings first, then weather, performance and insights</p>
           </div>
 
-          <div className={`${panel} p-2.5 xl:col-span-4 overflow-x-auto self-start h-fit`}>
-            <div className="text-[10px] font-bold text-slate-300 mb-1">EARNINGS & PROFIT BY FIELD (4 fields)</div>
-            <table className="w-full text-[10px] min-w-[420px]">
-              <thead>
-                <tr className="text-slate-500 border-b border-[#1e2d40]">
-                  <th className="text-left py-1">Field</th>
-                  <th className="text-right py-1">Yield (t)</th>
-                  <th className="text-right py-1">Revenue</th>
-                  <th className="text-right py-1">Profit</th>
-                  <th className="text-right py-1">₹/ha</th>
-                  <th className="text-right py-1">Margin</th>
-                </tr>
-              </thead>
-              <tbody>
-                {zones.map((z, i) => (
-                  <tr
-                    key={z.id}
-                    onClick={() => setSelectedFieldId(z.id)}
-                    className={`border-b border-[#1e2d40]/40 cursor-pointer hover:bg-violet-500/5 ${
-                      selectedFieldId === z.id ? 'bg-violet-500/10' : ''
+          {/* TOP ROW — full earnings table + performance + insights */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+            {/* Earnings by field — wide, full table */}
+            <div className={`${panel} p-5 md:p-6 xl:col-span-7 min-w-0`}>
+              <div className="text-base font-bold text-white mb-1">Earnings by field</div>
+              <p className="text-[12px] text-slate-400 mb-4">Full table · click a row to scope the dashboard</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px] min-w-[520px]">
+                  <thead>
+                    <tr className="text-slate-400 border-b border-[#1e2d40] text-left">
+                      <th className="py-2.5 pr-3 font-semibold">Field</th>
+                      <th className="py-2.5 px-2 font-semibold text-right">Yield (t)</th>
+                      <th className="py-2.5 px-2 font-semibold text-right">Revenue</th>
+                      <th className="py-2.5 px-2 font-semibold text-right">Profit</th>
+                      <th className="py-2.5 px-2 font-semibold text-right">₹/ha</th>
+                      <th className="py-2.5 pl-2 font-semibold text-right">Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {zones.map((z, i) => (
+                      <tr
+                        key={z.id}
+                        onClick={() => setSelectedFieldId(z.id)}
+                        className={`border-b border-[#1e2d40]/50 cursor-pointer hover:bg-violet-500/5 ${
+                          selectedFieldId === z.id ? 'bg-violet-500/10' : ''
+                        }`}
+                      >
+                        <td className="py-3 pr-3 text-white font-medium">
+                          <span className="inline-flex items-center gap-1.5 flex-wrap">
+                            {z.name}
+                            {i === 0 && (
+                              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded">
+                                Best
+                              </span>
+                            )}
+                          </span>
+                          <div className="text-[12px] text-slate-500 font-normal mt-0.5">
+                            {z.variety} · {z.acres} ac
+                          </div>
+                        </td>
+                        <td className="text-right text-slate-200 tabular-nums px-2 whitespace-nowrap">{z.yield}</td>
+                        <td className="text-right text-slate-300 tabular-nums px-2 whitespace-nowrap">{formatInr(z.revenue)}</td>
+                        <td className={`text-right font-semibold tabular-nums px-2 whitespace-nowrap ${z.profit >= 0 ? 'text-emerald-300' : 'text-rose-400'}`}>
+                          {formatInr(z.profit)}
+                        </td>
+                        <td className="text-right text-slate-400 tabular-nums px-2 whitespace-nowrap">{formatInr(z.profitPerHa)}</td>
+                        <td className={`text-right tabular-nums pl-2 ${z.margin >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {z.margin}%
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="border-t border-[#1e2d40] font-semibold">
+                      <td className="py-3 text-slate-200">Farm total</td>
+                      <td className="text-right text-slate-200 tabular-nums">{farmTotals.totalYield}</td>
+                      <td className="text-right text-slate-300 tabular-nums">{formatInr(farmTotals.revenue)}</td>
+                      <td className="text-right text-emerald-300 tabular-nums">{formatInr(farmTotals.profit)}</td>
+                      <td className="text-right text-slate-400 tabular-nums">{formatInr(farmTotals.profitPerHa)}</td>
+                      <td className="text-right text-emerald-400 tabular-nums">{farmTotals.margin}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Farm performance */}
+            <div className={`${panel} p-5 md:p-6 xl:col-span-2 flex flex-col items-center text-center`}>
+              <div className="text-base font-bold text-white mb-1 w-full text-left">Farm performance</div>
+              <p className="text-[12px] text-slate-400 mb-3 w-full text-left">Overall score</p>
+              <div className="relative w-28 h-28 my-1">
+                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                  <circle cx="50" cy="50" r="38" stroke="#1e2d40" strokeWidth="8" fill="none" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="38"
+                    stroke="#8b5cf6"
+                    strokeWidth="8"
+                    fill="none"
+                    strokeDasharray={2 * Math.PI * 38}
+                    strokeDashoffset={2 * Math.PI * 38 * (1 - perfScore / 100)}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-3xl font-bold text-white leading-none">{perfScore}</span>
+                  <span className="text-[12px] text-slate-400 mt-0.5">/100</span>
+                </div>
+              </div>
+              <div className="text-emerald-400 text-[14px] font-bold mt-2">
+                {perfScore >= 80 ? 'Excellent' : perfScore >= 55 ? 'Good' : 'Needs attention'}
+              </div>
+              <div className="text-[12px] text-emerald-400/90 mt-1">↑ 8% vs last 7 days</div>
+              <div className="mt-auto pt-3 w-full grid grid-cols-1 gap-2 text-[12px]">
+                <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2 py-2">
+                  <div className="text-slate-500">Margin</div>
+                  <div className="text-white font-semibold">{margin}%</div>
+                </div>
+                <div className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2 py-2">
+                  <div className="text-slate-500">Profit</div>
+                  <div className="text-emerald-300 font-semibold truncate">{formatInr(profit)}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Key insights */}
+            <div className={`${panel} p-5 md:p-6 xl:col-span-3 flex flex-col`}>
+              <div className="text-base font-bold text-white mb-1">Key insights</div>
+              <p className="text-[12px] text-slate-400 mb-3">Yield, profit, market and cost</p>
+              <div className="space-y-2 text-[13px] leading-relaxed flex-1">
+                <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] p-3">
+                  <div className="flex items-center gap-2 text-emerald-300 font-semibold mb-1">
+                    <Activity size={14} /> {vsYield >= 0 ? 'Strong yield' : 'Yield pressure'}
+                  </div>
+                  <p className="text-slate-400">
+                    {season}: yield {vsYield >= 0 ? 'up' : 'down'} {Math.abs(vsYield)}% vs prior · harvest{' '}
+                    {profile?.harvestMonths ?? '—'}.
+                  </p>
+                </div>
+                <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] p-3">
+                  <div className="flex items-center gap-2 text-violet-300 font-semibold mb-1">
+                    <TrendingUp size={14} /> Season profitability
+                  </div>
+                  <p className="text-slate-400">
+                    Margin {margin}% · year profit {formatInr(yearProfit)} ({yearMargin}%).
+                  </p>
+                </div>
+                <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] p-3">
+                  <div className="flex items-center gap-2 text-sky-300 font-semibold mb-1">
+                    <Leaf size={14} /> Market opportunity
+                  </div>
+                  <p className="text-slate-400">{arbitrage.action_tag}</p>
+                </div>
+                <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] p-3">
+                  <div className="flex items-center gap-2 text-amber-300 font-semibold mb-1">
+                    <Zap size={14} /> Cost profile
+                  </div>
+                  <p className="text-slate-400">
+                    Cost {vsCost >= 0 ? 'up' : 'down'} {Math.abs(vsCost)}% vs last season.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReport(true)}
+                className="w-full mt-3 text-[13px] font-semibold py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white flex items-center justify-center gap-2"
+              >
+                <FileText size={15} /> Generate detailed report
+              </button>
+            </div>
+          </div>
+
+          {/* BOTTOM ROW — Weather & constraints placed down as requested */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <div className={`${panel} p-5 md:p-6 lg:col-span-8`}>
+              <div className="text-base font-bold text-white mb-1">Weather & constraints</div>
+              <p className="text-[12px] text-slate-400 mb-4">
+                {selectedFieldId === 'all' ? 'Farm average' : `Field ${selectedFieldId}`} · environment impact on yield
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-[13px]">
+                {[
+                  {
+                    icon: <Thermometer size={16} className="text-orange-400" />,
+                    f: 'Temperature',
+                    v: `${sim.env.temperature}°C`,
+                    st: activeField?.tempImpact ?? fieldAnalytics[0]?.tempImpact ?? '—',
+                  },
+                  {
+                    icon: <Cloud size={16} className="text-sky-400" />,
+                    f: 'Rainfall',
+                    v: `${sim.env.rainfall.toFixed(1)} mm`,
+                    st: activeField?.rainImpact ?? fieldAnalytics[0]?.rainImpact ?? '—',
+                  },
+                  {
+                    icon: <Droplets size={16} className="text-cyan-400" />,
+                    f: 'Field moisture',
+                    v: `${activeField?.soilMoisture ?? Math.round(fieldAnalytics.reduce((s, x) => s + x.soilMoisture, 0) / Math.max(1, fieldAnalytics.length))}%`,
+                    st: activeField?.moistureImpact ?? fieldAnalytics[0]?.moistureImpact ?? '—',
+                  },
+                  {
+                    icon: <Sun size={16} className="text-yellow-400" />,
+                    f: 'Sunlight',
+                    v: `${Math.round(sim.env.sunlight)} W/m²`,
+                    st: sim.env.sunlight >= 500 ? 'Positive ↑' : 'Low light ↓',
+                  },
+                  {
+                    icon: <Wind size={16} className="text-slate-400" />,
+                    f: 'Wind speed',
+                    v: `${sim.env.windSpeed ?? 18} km/h`,
+                    st: (sim.env.windSpeed ?? 18) > 28 ? 'High wind ↓' : 'Neutral →',
+                  },
+                ].map((r) => {
+                  const sc =
+                    r.st.includes('↓') || r.st.includes('risk') || r.st.includes('Deficit') || r.st.includes('Excess')
+                      ? 'text-amber-400'
+                      : r.st.includes('↑') || r.st.includes('Optimal') || r.st.includes('Favorable')
+                        ? 'text-emerald-400'
+                        : 'text-slate-400';
+                  return (
+                    <div
+                      key={r.f}
+                      className="rounded-xl bg-[#0b131e] border border-[#1e2d40] px-3 py-3 flex items-start gap-3"
+                    >
+                      <span className="shrink-0 mt-0.5">{r.icon}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-slate-400 text-[12px]">{r.f}</div>
+                        <div className="text-white font-semibold tabular-nums mt-0.5">{r.v}</div>
+                        <div className={`text-[12px] font-semibold mt-1 ${sc}`}>{r.st}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {(activeField?.constraints ?? fieldAnalytics[0]?.constraints ?? []).slice(0, 4).map((c) => (
+                  <span
+                    key={c}
+                    className={`text-[11px] px-2 py-1 rounded-lg border ${
+                      c.includes('optimal') || c.includes('Within')
+                        ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'
+                        : 'border-amber-500/30 text-amber-200 bg-amber-500/10'
                     }`}
                   >
-                    <td className="py-1 text-white font-medium">
-                      {z.name}
-                      {i === 0 && <span className="ml-1 text-[8px] bg-emerald-500/20 text-emerald-300 px-1 rounded">Best</span>}
-                      <div className="text-[8px] text-slate-500 font-normal">{z.variety} · {z.acres} ac</div>
-                    </td>
-                    <td className="text-right text-slate-200">{z.yield}</td>
-                    <td className="text-right text-slate-300">{formatInr(z.revenue)}</td>
-                    <td className="text-right text-emerald-300 font-semibold">{formatInr(z.profit)}</td>
-                    <td className="text-right text-slate-400">{formatInr(z.profitPerHa)}</td>
-                    <td className="text-right text-emerald-400">{z.margin}%</td>
-                  </tr>
+                    {c}
+                  </span>
                 ))}
-                <tr className="border-t border-[#1e2d40] font-semibold">
-                  <td className="py-1.5 text-slate-300">Farm total</td>
-                  <td className="text-right text-slate-200">{farmTotals.totalYield}</td>
-                  <td className="text-right text-slate-300">{formatInr(farmTotals.revenue)}</td>
-                  <td className="text-right text-emerald-300">{formatInr(farmTotals.profit)}</td>
-                  <td className="text-right text-slate-400">{formatInr(farmTotals.profitPerHa)}</td>
-                  <td className="text-right text-emerald-400">{farmTotals.margin}%</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div className={`${panel} p-2.5 xl:col-span-3 self-start h-fit`}>
-            <div className="text-[10px] font-bold text-slate-300 mb-2">
-              WEATHER & CONSTRAINTS
-              <span className="ml-1 text-slate-500 font-normal">
-                {selectedFieldId === 'all' ? '· farm' : `· Field ${selectedFieldId}`}
-              </span>
-            </div>
-            <div className="space-y-1.5 text-[10px]">
-              {[
-                {
-                  icon: <Thermometer size={12} className="text-orange-400" />,
-                  f: 'Temperature',
-                  v: `${sim.env.temperature}°C`,
-                  st: activeField?.tempImpact ?? fieldAnalytics[0]?.tempImpact ?? '—',
-                },
-                {
-                  icon: <Cloud size={12} className="text-sky-400" />,
-                  f: 'Rainfall',
-                  v: `${sim.env.rainfall.toFixed(1)} mm`,
-                  st: activeField?.rainImpact ?? fieldAnalytics[0]?.rainImpact ?? '—',
-                },
-                {
-                  icon: <Droplets size={12} className="text-cyan-400" />,
-                  f: 'Field moisture',
-                  v: `${activeField?.soilMoisture ?? Math.round(fieldAnalytics.reduce((s, x) => s + x.soilMoisture, 0) / Math.max(1, fieldAnalytics.length))}%`,
-                  st: activeField?.moistureImpact ?? fieldAnalytics[0]?.moistureImpact ?? '—',
-                },
-                {
-                  icon: <Sun size={12} className="text-yellow-400" />,
-                  f: 'Sunlight',
-                  v: `${Math.round(sim.env.sunlight)} W/m²`,
-                  st: sim.env.sunlight >= 500 ? 'Positive ↑' : 'Low light ↓',
-                },
-                {
-                  icon: <Wind size={12} className="text-slate-400" />,
-                  f: 'Wind Speed',
-                  v: `${sim.env.windSpeed ?? 18} km/h`,
-                  st: (sim.env.windSpeed ?? 18) > 28 ? 'High wind ↓' : 'Neutral →',
-                },
-              ].map((r) => {
-                const sc = r.st.includes('↓') || r.st.includes('risk') || r.st.includes('Deficit') || r.st.includes('Excess')
-                  ? 'text-amber-400'
-                  : r.st.includes('↑') || r.st.includes('Optimal') || r.st.includes('Favorable')
-                    ? 'text-emerald-400'
-                    : 'text-slate-400';
-                return (
-                  <div key={r.f} className="flex items-center gap-2 py-0.5 border-b border-[#1e2d40]/40 last:border-0">
-                    {r.icon}
-                    <span className="text-slate-400 flex-1">{r.f}</span>
-                    <span className="text-slate-200">{r.v}</span>
-                    <span className={`w-[4.5rem] text-right font-semibold ${sc}`}>{r.st}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {(activeField?.constraints ?? fieldAnalytics[0]?.constraints ?? []).slice(0, 4).map((c) => (
-                <span
-                  key={c}
-                  className={`text-[8px] px-1.5 py-0.5 rounded border ${
-                    c.includes('optimal') || c.includes('Within')
-                      ? 'border-emerald-500/30 text-emerald-300 bg-emerald-500/10'
-                      : 'border-amber-500/30 text-amber-200 bg-amber-500/10'
-                  }`}
-                >
-                  {c}
+                <span className="text-[12px] text-slate-400 ml-auto">
+                  Yield factor{' '}
+                  <span className="text-violet-300 font-semibold">
+                    ×{(activeField?.yieldFactor ?? fieldAnalytics[0]?.yieldFactor ?? 1).toFixed(2)}
+                  </span>
+                  {' · '}weather score{' '}
+                  <span className="text-white font-semibold">
+                    {activeField?.weatherScore ?? fieldAnalytics[0]?.weatherScore ?? '—'}
+                  </span>
                 </span>
-              ))}
+              </div>
             </div>
-            <div className="mt-1.5 text-[9px] text-slate-500">
-              Env yield factor{' '}
-              <span className="text-violet-300 font-semibold">
-                ×{(activeField?.yieldFactor ?? fieldAnalytics[0]?.yieldFactor ?? 1).toFixed(2)}
-              </span>
-              {' · '}weather score{' '}
-              <span className="text-white font-semibold">
-                {activeField?.weatherScore ?? fieldAnalytics[0]?.weatherScore ?? '—'}
-              </span>
-            </div>
-          </div>
 
-          <div className={`${panel} p-2.5 xl:col-span-3 space-y-2 self-start h-fit`}>
-            <div className="text-[10px] font-bold text-slate-300">KEY INSIGHTS</div>
-            <div className="space-y-1.5 text-[9px]">
-              <div className="flex gap-2 items-start rounded-lg bg-[#0b131e] border border-[#1e2d40] p-2">
-                <Activity size={12} className="text-emerald-400 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-emerald-300 font-semibold">{vsYield >= 0 ? 'Strong Yield' : 'Yield Pressure'}</div>
-                  <div className="text-slate-500">
-                    {season}: yield {vsYield >= 0 ? 'up' : 'down'} {Math.abs(vsYield)}% vs prior season · harvest {profile?.harvestMonths ?? '—'}.
+            <div className={`${panel} p-5 md:p-6 lg:col-span-4`}>
+              <div className="text-base font-bold text-white mb-1">Export / arbitrage</div>
+              <p className="text-[12px] text-slate-400 mb-4">{arbitrage.commodity}</p>
+              <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-4 text-[13px]">
+                <div className="space-y-2.5 text-slate-400">
+                  <div className="flex justify-between gap-2">
+                    <span>Local spot</span>
+                    <span className="text-white font-medium">₹{arbitrage.local_spot_price_quintal_inr}/qtl</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span>Net export parity</span>
+                    <span className="text-white font-medium">
+                      ₹{Math.round(arbitrage.net_export_value_inr).toLocaleString('en-IN')}/t
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span>Spread</span>
+                    <span className={arbitrage.spread_percentage > 0 ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                      {arbitrage.spread_percentage > 0 ? '+' : ''}
+                      {arbitrage.spread_percentage}%
+                    </span>
                   </div>
                 </div>
-              </div>
-              <div className="flex gap-2 items-start rounded-lg bg-[#0b131e] border border-[#1e2d40] p-2">
-                <TrendingUp size={12} className="text-violet-400 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-violet-300 font-semibold">Season Profitability</div>
-                  <div className="text-slate-500">Margin {margin}% · year profit forecast {formatInr(yearProfit)} ({yearMargin}%).</div>
-                </div>
-              </div>
-              <div className="flex gap-2 items-start rounded-lg bg-[#0b131e] border border-[#1e2d40] p-2">
-                <Leaf size={12} className="text-sky-400 shrink-0 mt-0.5" />
-                <div><div className="text-sky-300 font-semibold">Market Opportunity</div><div className="text-slate-500">{arbitrage.action_tag}</div></div>
-              </div>
-              <div className="flex gap-2 items-start rounded-lg bg-[#0b131e] border border-[#1e2d40] p-2">
-                <Zap size={12} className="text-amber-400 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-amber-300 font-semibold">Cost Profile</div>
-                  <div className="text-slate-500">
-                    {season.includes('Summer') ? 'Irrigation-heavy cost mix this season.' : season.includes('Kharif') ? 'Labor share elevated in Kharif.' : 'Balanced cost structure.'}
-                    {' '}Cost {vsCost >= 0 ? 'up' : 'down'} {Math.abs(vsCost)}% vs last season.
-                  </div>
-                </div>
+                <p className="text-slate-500 mt-3 leading-snug text-[12px]">{arbitrage.directive_message}</p>
               </div>
             </div>
-
-            {/* Arbitrage card from market engine */}
-            <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-2 text-[9px]">
-              <div className="font-bold text-violet-200 mb-1">EXPORT / ARBITRAGE · {arbitrage.commodity}</div>
-              <div className="space-y-0.5 text-slate-400">
-                <div className="flex justify-between"><span>Local spot</span><span className="text-white">₹{arbitrage.local_spot_price_quintal_inr}/qtl</span></div>
-                <div className="flex justify-between"><span>Net export parity</span><span className="text-white">₹{Math.round(arbitrage.net_export_value_inr).toLocaleString('en-IN')}/t</span></div>
-                <div className="flex justify-between"><span>Spread</span><span className={arbitrage.spread_percentage > 0 ? 'text-emerald-400' : 'text-rose-400'}>{arbitrage.spread_percentage > 0 ? '+' : ''}{arbitrage.spread_percentage}%</span></div>
-              </div>
-              <div className="text-slate-500 mt-1 leading-snug">{arbitrage.directive_message}</div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowReport(true)}
-              className="w-full text-[11px] font-semibold py-2 rounded-lg bg-violet-600/80 hover:bg-violet-600 text-white flex items-center justify-center gap-1.5"
-            >
-              <FileText size={13} /> Generate Detailed Report
-            </button>
           </div>
-        </div>
+        </section>
 
         {/* Detailed report modal — scoped to selected field / farm */}
         {showReport && (
