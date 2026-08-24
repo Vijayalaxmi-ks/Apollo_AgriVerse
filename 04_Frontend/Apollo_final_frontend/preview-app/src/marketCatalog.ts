@@ -40,7 +40,15 @@ export function getCities(state: string): string[] {
 }
 
 export function getAllCropsFlat(): string[] {
-  return Object.values(CROPS_CATALOG).flat().sort();
+  const all = Object.values(CROPS_CATALOG).flat();
+  const grapes = all
+    .filter((c) => /grape/i.test(c))
+    .sort((a, b) => a.localeCompare(b));
+  const others = all
+    .filter((c) => !/grape/i.test(c))
+    .sort((a, b) => a.localeCompare(b));
+  // Grape varieties first (priority), then remaining crops A–Z
+  return [...grapes, ...others];
 }
 
 export function getCropCategories(): string[] {

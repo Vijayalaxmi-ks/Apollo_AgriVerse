@@ -7,6 +7,8 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
   PieChart, Pie, Cell,
 } from 'recharts';
+import type { SoilClassId } from './simulation';
+import { SOIL_CLASSES, getSoilClass, FIELDS } from './simulation';
 
 type SoilTab =
   | 'overview'
@@ -228,12 +230,18 @@ function MoistureMap() {
   );
 }
 
-/* ─── 3D soil profile illustration (CSS) ─── */
-function SoilProfile3D() {
+/* ─── 3D soil profile illustration (CSS) — colors follow selected soil class ─── */
+function SoilProfile3D({ soilClassId }: { soilClassId: SoilClassId }) {
+  const sc = getSoilClass(soilClassId);
+  const layers = [
+    { top: 36, h: 32, bg: sc.light, label: '0-15' },
+    { top: 68, h: 36, bg: sc.base, label: '15-30' },
+    { top: 104, h: 40, bg: sc.dark, label: '30-60' },
+    { top: 144, h: 44, bg: '#1a120c', label: '60-100' },
+  ];
   return (
     <div className="relative rounded-xl border border-[#1e2d40] bg-gradient-to-b from-[#0f2744] to-[#0a1525] overflow-hidden p-3 h-[280px]">
-      <div className="text-[11px] font-bold text-slate-300 mb-2">3D SOIL PROFILE (Zone 2)</div>
-      {/* layered block */}
+      <div className="text-[11px] font-bold text-slate-300 mb-2">3D SOIL PROFILE · {sc.shortLabel}</div>
       <div className="relative mx-auto w-[200px] h-[200px]" style={{ perspective: '600px' }}>
         <div
           className="absolute inset-0 rounded-lg"
@@ -242,25 +250,20 @@ function SoilProfile3D() {
             transformStyle: 'preserve-3d',
           }}
         >
-          {/* top surface with vines */}
-          <div className="absolute inset-x-0 top-0 h-[36px] rounded-t-lg bg-gradient-to-b from-emerald-800 to-amber-900 border border-emerald-700/50 flex items-end justify-center gap-6 pb-1">
+          <div
+            className="absolute inset-x-0 top-0 h-[36px] rounded-t-lg border border-emerald-700/50 flex items-end justify-center gap-6 pb-1"
+            style={{ background: `linear-gradient(to bottom, #065f46, ${sc.base})` }}
+          >
             <span className="text-2xl">🌿</span>
             <span className="text-2xl">🍇</span>
             <span className="text-2xl">🌿</span>
           </div>
-          {/* soil layers */}
-          {[
-            { top: 36, h: 32, color: 'from-amber-800 to-amber-900', label: '0-15' },
-            { top: 68, h: 36, color: 'from-amber-900 to-yellow-950', label: '15-30' },
-            { top: 104, h: 40, color: 'from-yellow-950 to-stone-900', label: '30-60' },
-            { top: 144, h: 44, color: 'from-stone-900 to-stone-950', label: '60-100' },
-          ].map((layer) => (
+          {layers.map((layer) => (
             <div
               key={layer.label}
-              className={`absolute inset-x-0 bg-gradient-to-b ${layer.color} border-x border-b border-black/30`}
-              style={{ top: layer.top, height: layer.h }}
+              className="absolute inset-x-0 border-x border-b border-black/30"
+              style={{ top: layer.top, height: layer.h, background: layer.bg }}
             >
-              {/* water droplets */}
               <div className="absolute left-3 top-2 flex flex-col gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-sky-400/80" />
                 <span className="w-2 h-2 rounded-full bg-sky-400/60" />
@@ -277,17 +280,39 @@ function SoilProfile3D() {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sky-400" /> Water</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-lime-400" /> Nutrients</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-violet-400" /> Hydrogels</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-600" /> Roots</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: sc.base }} /> Soil</span>
       </div>
     </div>
   );
 }
 
 /* ─── Main panel ─── */
-export default function SoilPanel() {
+export default function SoilPanel({
+  soilClass = 'alluvial',
+  setSoilClass,
+  fieldSoilMap,
+  setFieldSoil,
+  selectedField = 'B',
+  setSelectedField,
+}: {
+  soilClass?: SoilClassId;
+  setSoilClass?: (id: SoilClassId) => void;
+  fieldSoilMap?: Record<string, SoilClassId>;
+  setFieldSoil?: (fieldId: string, soilId: SoilClassId) => void;
+  selectedField?: string;
+  setSelectedField?: (id: string) => void;
+}) {
   const [tab, setTab] = useState<SoilTab>('overview');
   const [updated] = useState('20 May 2025, 10:30 AM IST');
   const [showIrrigation, setShowIrrigation] = useState(false);
+  const [localSoil, setLocalSoil] = useState<SoilClassId>(soilClass);
+  const activeSoilId = setSoilClass ? soilClass : localSoil;
+  const setActiveSoil = (id: SoilClassId) => {
+    if (setFieldSoil && selectedField) setFieldSoil(selectedField, id);
+    else if (setSoilClass) setSoilClass(id);
+    else setLocalSoil(id);
+  };
+  const soilInfo = getSoilClass(activeSoilId);
 
   const irrigationSchedule = [
     { day: 'Tomorrow', date: '21 May', time: '06:00 – 07:30', liters: 4500, method: 'Drip', zone: 'Zone 2', status: 'Scheduled' },
@@ -461,6 +486,88 @@ export default function SoilPanel() {
                     <div className={`text-[11px] font-semibold mt-auto ${m.ok ? 'text-emerald-400' : 'text-amber-400'}`}>{m.status}</div>
                   </div>
                 ))}
+              </div>
+
+              {/* Intelligent Soil — always near top so it is visible without scrolling */}
+              <div className="bg-[#16202d] rounded-xl border border-emerald-500/30 p-4">
+                <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                  <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                    <span
+                      className="inline-block w-3.5 h-3.5 rounded-sm border border-white/20"
+                      style={{ background: soilInfo.base }}
+                    />
+                    INTELLIGENT SOIL · Field {selectedField} · {soilInfo.label}
+                  </h3>
+                </div>
+                {/* Field picker + soil type for that field */}
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {FIELDS.map((f) => {
+                    const sid = fieldSoilMap?.[f.id] || (f.id === selectedField ? activeSoilId : 'alluvial');
+                    const sc = getSoilClass(sid);
+                    const on = f.id === selectedField;
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setSelectedField?.(f.id)}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-semibold transition ${
+                          on
+                            ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
+                            : 'border-[#1e2d40] text-slate-400 hover:border-slate-600'
+                        }`}
+                      >
+                        <span className="w-2.5 h-2.5 rounded-sm border border-black/30" style={{ background: sc.base }} />
+                        {f.name}
+                        <span className="text-slate-500 font-normal">{sc.shortLabel}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {SOIL_CLASSES.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setActiveSoil(s.id)}
+                      className={`px-2 py-0.5 rounded text-[9px] font-semibold border ${
+                        activeSoilId === s.id
+                          ? 'border-emerald-500/50 bg-emerald-500/20 text-emerald-300'
+                          : 'border-[#1e2d40] text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {s.shortLabel}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[12px] text-slate-300 leading-relaxed mb-3">{soilInfo.description}</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                  {[
+                    { l: 'Water holding', v: soilInfo.waterHolding },
+                    { l: 'Drainage', v: soilInfo.drainage },
+                    { l: 'pH range', v: soilInfo.phRange },
+                    { l: 'Crop fit', v: soilInfo.cropFit },
+                  ].map((c) => (
+                    <div key={c.l} className="bg-[#0f1722] rounded-lg border border-[#1e2d40] p-2.5">
+                      <div className="text-[10px] text-slate-500">{c.l}</div>
+                      <div className="text-[11px] text-white font-semibold mt-0.5 leading-snug">{c.v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-[#0f1722] rounded-lg border border-[#1e2d40] p-3">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Nutrient profile</div>
+                    <p className="text-[11px] text-slate-300 leading-snug">{soilInfo.nutrientNote}</p>
+                    <p className="text-[11px] text-slate-500 mt-1.5">{soilInfo.textureNote}</p>
+                  </div>
+                  <div className="bg-[#0f1722] rounded-lg border border-[#1e2d40] p-3">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Management focus</div>
+                    <ul className="text-[11px] text-slate-300 space-y-1 list-disc list-inside">
+                      {soilInfo.management.map((m) => (
+                        <li key={m}>{m}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1120,7 +1227,53 @@ export default function SoilPanel() {
 
         {/* RIGHT SIDEBAR — always visible */}
         <div className="w-[300px] shrink-0 border-l border-[#1e2d40] bg-[#0b131e] overflow-y-auto p-3 flex flex-col gap-3">
-          <SoilProfile3D />
+          <SoilProfile3D soilClassId={activeSoilId} />
+
+          <div className="bg-[#16202d] rounded-xl border border-[#1e2d40] p-3">
+            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+              Soil by field
+            </div>
+            <div className="space-y-2 mb-2">
+              {FIELDS.map((f) => {
+                const sid = fieldSoilMap?.[f.id] || (f.id === selectedField ? activeSoilId : 'alluvial');
+                const sc = getSoilClass(sid);
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setSelectedField?.(f.id)}
+                    className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 border text-left transition ${
+                      selectedField === f.id
+                        ? 'border-emerald-500/50 bg-emerald-500/15'
+                        : 'border-[#1e2d40] hover:border-slate-600'
+                    }`}
+                  >
+                    <span className="w-3 h-3 rounded-sm border border-black/30" style={{ background: sc.base }} />
+                    <span className="text-[10px] font-semibold text-white flex-1">{f.name}</span>
+                    <span className="text-[9px] text-slate-400">{sc.shortLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="text-[9px] text-slate-500 mb-1.5">Set type for Field {selectedField}</div>
+            <div className="space-y-1">
+              {SOIL_CLASSES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setActiveSoil(s.id)}
+                  className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 border text-left transition ${
+                    activeSoilId === s.id
+                      ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
+                      : 'border-[#1e2d40] text-slate-400 hover:border-slate-600'
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 rounded-sm shrink-0 border border-black/30" style={{ background: s.base }} />
+                  <span className="text-[10px] font-semibold">{s.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="bg-[#16202d] rounded-xl border border-[#1e2d40] p-3">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Depth (cm)</div>

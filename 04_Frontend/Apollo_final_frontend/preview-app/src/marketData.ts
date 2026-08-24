@@ -266,6 +266,124 @@ export function computeFieldConstraints(env: FieldEnvInput = {}): FieldConstrain
  * Used by Analytics panel so KPIs, charts and year forecast all move with season.
  * Optional env applies live weather + field constraints.
  */
+/** Per-acre input cost model (INR) — variety / soil / weather aware */
+export type InputCostBreakdown = {
+  seeds: number;
+  technology: number;
+  chemicals: number;
+  other: number;
+  total: number;
+  perAcre: { seeds: number; technology: number; chemicals: number; other: number; total: number };
+  notes: string[];
+};
+
+/**
+ * Estimate field input costs:
+ * - Seeds / planting material (cuttings, rootstock)
+ * - Technology (drip, sensors, hydrogel, mulch, power)
+ * - Chemicals (fertilizers, pesticides, growth regulators)
+ * Scaled by variety vigor, soil class, and live weather stress.
+ */
+export function estimateInputCostBreakdown(opts: {
+  acres: number;
+  varietyId?: string;
+  soilClass?: string;
+  season?: string;
+  env?: FieldEnvInput;
+}): InputCostBreakdown {
+  const acres = Math.max(0.01, opts.acres);
+  const varietyId = (opts.varietyId || 'thompson').toLowerCase();
+  const soil = (opts.soilClass || 'alluvial').toLowerCase();
+  const season = opts.season || '';
+  const env = opts.env || {};
+
+  // Base per-acre INR (Maharashtra commercial table grape order of magnitude)
+  let seedPerAc = 18500; // cuttings / rootstock / gap filling
+  let techPerAc = 32000; // drip amortized + sensors + mulch + hydrogel share
+  let chemPerAc = 28000; // fertigation + fungicides + insecticides + PGR
+  let otherPerAc = 14000; // labor share of inputs logistics, misc
+
+  // Variety adjustments
+  if (varietyId.includes('sharad') || varietyId.includes('shyama')) {
+    seedPerAc *= 1.12; // coloured material premium
+    chemPerAc *= 1.08; // colour / quality sprays
+    techPerAc *= 1.05;
+  } else if (varietyId.includes('naveen')) {
+    seedPerAc *= 1.06;
+    chemPerAc *= 0.97; // shorter cycle, slightly less chem window
+  } else if (varietyId.includes('ganesh') || varietyId.includes('tas')) {
+    seedPerAc *= 1.04;
+    techPerAc *= 1.03;
+  }
+
+  // Soil class adjustments
+  if (soil === 'alkaline') {
+    chemPerAc *= 1.18; // gypsum / amendments / extra nutrition
+    techPerAc *= 1.08;
+  } else if (soil === 'lateritic') {
+    chemPerAc *= 1.12;
+    seedPerAc *= 1.05;
+  } else if (soil === 'black') {
+    techPerAc *= 1.06; // drainage / pumping
+    chemPerAc *= 1.04;
+  } else if (soil === 'red') {
+    chemPerAc *= 1.03;
+  } else if (soil === 'alluvial') {
+    chemPerAc *= 0.97;
+    seedPerAc *= 0.98;
+  }
+
+  // Weather / environment
+  const rain = env.rainfall ?? 2;
+  const heat = env.stressHeat ?? 0;
+  const water = env.stressWater ?? 0;
+  const humid = env.humidity ?? 60;
+  if (rain > 6 || humid > 78) chemPerAc *= 1.12; // disease pressure
+  if (heat > 0.35) {
+    techPerAc *= 1.08; // cooling / extra irrigation tech
+    chemPerAc *= 1.04;
+  }
+  if (water > 0.4) techPerAc *= 1.1; // more pumping / hydrogel
+  if ((env.hydrogelSat ?? 70) < 45) techPerAc *= 1.06;
+  if ((env.mulchCoverage ?? 80) < 60) {
+    techPerAc *= 1.05;
+    chemPerAc *= 1.03; // more weed / moisture loss pressure
+  }
+
+  // Season
+  if (season.includes('Summer')) {
+    techPerAc *= 1.12;
+    chemPerAc *= 1.05;
+  } else if (season.includes('Kharif')) {
+    chemPerAc *= 1.1;
+  }
+
+  const notes: string[] = [];
+  notes.push(`Variety driver: ${varietyId}`);
+  notes.push(`Soil driver: ${soil}`);
+  if (rain > 6 || humid > 78) notes.push('Elevated disease pressure → higher chemical budget');
+  if (heat > 0.35 || water > 0.4) notes.push('Heat/water stress → higher technology / irrigation spend');
+  if (soil === 'alkaline' || soil === 'lateritic') notes.push('Challenging soil → amendments & nutrition uplift');
+
+  const perAcre = {
+    seeds: Math.round(seedPerAc),
+    technology: Math.round(techPerAc),
+    chemicals: Math.round(chemPerAc),
+    other: Math.round(otherPerAc),
+    total: Math.round(seedPerAc + techPerAc + chemPerAc + otherPerAc),
+  };
+
+  return {
+    seeds: Math.round(perAcre.seeds * acres),
+    technology: Math.round(perAcre.technology * acres),
+    chemicals: Math.round(perAcre.chemicals * acres),
+    other: Math.round(perAcre.other * acres),
+    total: Math.round(perAcre.total * acres),
+    perAcre,
+    notes,
+  };
+}
+
 export function generateSeasonAnalytics(opts: {
   season: string;
   crop: string;
@@ -274,14 +392,23 @@ export function generateSeasonAnalytics(opts: {
   acres: number;
   healthIndex: number;
   env?: FieldEnvInput;
+  varietyId?: string;
+  soilClass?: string;
 }) {
   const profile = getSeasonProfile(opts.season);
   const cropYieldPerAcre = getTypicalYieldPerAcre(opts.crop);
   const healthFactor = 0.85 + (opts.healthIndex / 100) * 0.25;
   const constraints = computeFieldConstraints(opts.env || {});
+  // Variety yield tilt
+  const vId = (opts.varietyId || '').toLowerCase();
+  let varietyYield = 1;
+  if (vId.includes('ganesh') || vId.includes('tas')) varietyYield = 1.08;
+  else if (vId.includes('naveen')) varietyYield = 1.05;
+  else if (vId.includes('sharad')) varietyYield = 0.98;
+  else if (vId.includes('shyama')) varietyYield = 0.95;
   // Base seasonal yield (tons) × live environment factor
   let totalYield = +(
-    cropYieldPerAcre * opts.acres * healthFactor * 0.55 * profile.yieldFactor * constraints.yieldFactor
+    cropYieldPerAcre * opts.acres * healthFactor * 0.55 * profile.yieldFactor * constraints.yieldFactor * varietyYield
   ).toFixed(2);
 
   // Annual = sum of three seasonal cycles with slight variation + env
@@ -303,7 +430,18 @@ export function generateSeasonAnalytics(opts: {
   const costRatio = Math.min(0.82, baseCostRatio * profile.costFactor * constraints.costFactor);
 
   const revenue = Math.round(totalYield * pricePerTon);
-  const productionCost = Math.round(revenue * costRatio);
+
+  // Detailed input costs (seeds / technology / chemicals) from agronomy model
+  const inputCosts = estimateInputCostBreakdown({
+    acres: opts.acres,
+    varietyId: opts.varietyId,
+    soilClass: opts.soilClass,
+    season: opts.season,
+    env: opts.env,
+  });
+  // Blend structured inputs with revenue-linked overhead so total stays realistic
+  const overhead = Math.round(revenue * costRatio * 0.42);
+  const productionCost = Math.max(inputCosts.total + overhead, Math.round(revenue * costRatio * 0.85));
   const profit = revenue - productionCost;
   const margin = revenue > 0 ? +((profit / revenue) * 100).toFixed(1) : 0;
 
@@ -374,6 +512,8 @@ export function generateSeasonAnalytics(opts: {
     vsCost,
     priceSummary,
     constraints,
+    inputCosts,
+    overhead,
   };
 }
 
