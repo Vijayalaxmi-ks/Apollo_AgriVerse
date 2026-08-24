@@ -41,8 +41,8 @@ if report["disqualified_crops"]:
   print("❌ Disqualified Unsuitable Crops:")
   for disq in report["disqualified_crops"]:
     print(
-        f"   - {disq['crop_name']}: Agronomic Score = {disq['agronomic_score']}%"
-        f" ({disq['reason']})"
+        f"   - {disq['crop_name'].upper()}: Not recommended because regional conditions"
+        f" fall short of strict growth requirements ({disq['reason']})."
     )
 else:
   print("✅ All candidate crops passed agronomic threshold.")
@@ -50,65 +50,61 @@ else:
 print("\n-----------------------------------------------------------------")
 print("STAGE 2: ECONOMIC RANKING & FINAL RECOMMENDATIONS")
 print("-----------------------------------------------------------------")
+
+# Helper function to translate technical parameters into clear farmer explanations
+def translate_to_farmer_language(pro_con_string, crop_name):
+    text = pro_con_string.lower()
+    if "soil (ph)" in text:
+        return f"• Acidity Balance: The soil pH is right in the safe neutral range, allowing plant roots in your bhumi to absorb nutrients easily without blockages."
+    elif "soil (texture)" in text:
+        return f"• Soil Type: Your field's structure holds natural moisture well and provides strong physical support for root and crop expansion."
+    elif "soil (salinity" in text or "ec)" in text:
+        return f"• Salt Levels: Salt concentration is very low, meaning zero risk of root-burn or chemical stress for your {crop_name}."
+    elif "soil (organic carbon)" in text:
+        return f"• Organic Matter: Natural organic nutrients in your field are at a healthy level to support steady growth."
+    elif "climate (seasonal)" in text:
+        return f"• Local Weather: Regional temperature patterns align safely with the natural comfort bounds of this crop."
+    elif "climate (hydrology)" in text or "rainfall" in text:
+        return f"• Seasonal Rainfall: Normal regional rainfall patterns support the general moisture needs of this crop."
+    elif "water" in text and ("deficit" in text or "stress" in text or "micro-irrigation" in text):
+        return f"• Water Management Alert: Because local water supply is low, supplemental drip or micro-irrigation will be needed during key growth stages to protect your yield."
+    else:
+        # Fallback to a clean descriptive presentation if it's another technical note
+        return f"• Field Check: {pro_con_string}"
+
 for rec in report["primary_recommendations"]:
   st = rec["score_tree"]
   soil_sub = st["soil"]["sub_tree"]
+  crop_display_name = rec['crop_name'].upper()
 
   print("\n" + "=" * 65)
   print(
-      f"🏆 {rec['crop_name']} — Final Score: {rec['final_suitability_score']}%"
-      f" ({rec['suitability_band']})"
+      f"🏆 {crop_display_name} — Recommended Choice"
+      f" (Expected Market Profit: High | Mandi Price: ₹{st['market']['modal_price']}/qtl)"
   )
-  print(f"   [Agronomic Viability Score: {rec['agronomic_score']}%]")
   print("=" * 65)
 
-  print("  📊 Two-Stage Score Tree Breakdown:")
+  print(f"  📊 Financial & Performance Overview:")
+  print(f"     • Final Suitability Score: {rec['final_suitability_score']}% ({rec['suitability_band']})")
+  print(f"     • Market Trend: {st['market']['trend']} (Price: ₹{st['market']['modal_price']}/qtl)")
   print(
-      f"     ├── Climate Vector: {st['climate']['score']}/100 (Weight: 40%) ->"
-      f" Contribution: {st['climate']['contribution']} pts"
-  )
-  print(
-      f"     ├── Soil Vector:    {st['soil']['score']}/100 (Weight: 40%) ->"
-      f" Contribution: {st['soil']['contribution']} pts"
-  )
-  print(f"     │    ├── pH Score:             {soil_sub['ph']}%")
-  print(f"     │    ├── Texture Compatibility: {soil_sub['texture']}%")
-  print(f"     │    ├── Organic Carbon (OC):  {soil_sub['organic_carbon']}%")
-  print(f"     │    ├── Salinity (EC):        {soil_sub['ec_salinity']}%")
-  print(f"     │    └── NPK Balance:          {soil_sub['npk_balance']}%")
-  print(
-      f"     ├── Water Vector:   {st['water']['score']}/100 (Weight: 20%) ->"
-      f" Contribution: {st['water']['contribution']} pts"
-  )
-  print(
-      f"     ├── Penalties:      -{st['penalties_deducted']} pts applied to"
-      " Agronomic total"
-  )
-  print(
-      f"     └── Market Ranker:  {st['market']['score']}/100 (Weight: 30%) ->"
-      f" Contribution: {st['market']['contribution']} pts"
-  )
-  print(
-      f"          (Modal Price: ₹{st['market']['modal_price']}/qtl | Trend:"
-      f" {st['market']['trend']})"
-  )
-  print(
-      "     -----------------------------------------------------------------"
-  )
-  print(
-      f"     FINAL COMPOSITE SCORE: {rec['final_suitability_score']}/100.0"
+      f"     -----------------------------------------------------------------"
   )
 
+  print("\n  ✅ Why your bhumi is ready for this crop:")
   if rec["pros"]:
-    print("\n  ✅ Key Pros:")
     for pro in rec["pros"]:
-      print(f"     - {pro}")
+      translated_pro = translate_to_farmer_language(pro, crop_display_name)
+      print(f"     {translated_pro}")
+  else:
+    print(f"     - Field conditions successfully clear all minimum growth criteria.")
 
   if rec["cons"] or rec["penalties_applied"]:
-    print("\n  ⚠️ Key Stress & Penalties:")
+    print("\n  ⚠️ What you need to manage on your farm:")
     for con in rec["cons"]:
-      print(f"     - {con}")
+      translated_con = translate_to_farmer_language(con, crop_display_name)
+      print(f"     {translated_con}")
     for pen in rec["penalties_applied"]:
-      print(f"     - {pen}")
+      print(f"     - Farm Management Note: {pen}")
 
 print("\n================================================================")
