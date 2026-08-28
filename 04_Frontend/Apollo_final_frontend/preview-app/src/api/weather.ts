@@ -38,6 +38,11 @@ export type LiveWeatherSummary = {
   maxTemp?: number;
   source?: string;
   isBackend?: boolean;
+  /** Observation date from weather API, e.g. "28 Aug 2026" */
+  observationDate?: string;
+  /** ISO YYYY-MM-DD from API when available */
+  observationDateIso?: string;
+  utcHour?: string;
 };
 
 function conditionFrom(temp: number, rain: number, cloud = 0): string {
@@ -46,6 +51,39 @@ function conditionFrom(temp: number, rain: number, cloud = 0): string {
   if (cloud > 35) return 'Partly Cloudy';
   if (temp >= 34) return 'Hot';
   return 'Clear Sky';
+}
+
+/** Parse backend date fields: "20260828" or "2026-08-28" → display + ISO */
+export function formatWeatherDate(
+  rawDate?: string,
+  _utcHour?: string,
+): { display: string; iso: string } {
+  const now = new Date();
+  let y = now.getFullYear();
+  let m = now.getMonth() + 1;
+  let d = now.getDate();
+
+  if (rawDate) {
+    const digits = rawDate.replace(/\D/g, '');
+    if (digits.length >= 8) {
+      y = parseInt(digits.slice(0, 4), 10);
+      m = parseInt(digits.slice(4, 6), 10);
+      d = parseInt(digits.slice(6, 8), 10);
+    } else if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+      const [yy, mm, dd] = rawDate.slice(0, 10).split('-').map(Number);
+      y = yy;
+      m = mm;
+      d = dd;
+    }
+  }
+
+  const iso = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const dt = new Date(`${iso}T12:00:00`);
+  const display = Number.isNaN(dt.getTime())
+    ? now.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  return { display, iso };
 }
 
 /** Prefer backend hybrid weather; fall back to Open-Meteo in the browser */
@@ -63,6 +101,7 @@ export async function fetchLiveWeatherSummary(
       const w = data.weather;
       const temp = Number(w.temperature_c ?? 0);
       const rain = Number(w.rainfall_mm ?? 0);
+      const { display, iso } = formatWeatherDate(data.date, data.utc_hour);
       return {
         city: data.city || city,
         temperature: Math.round(temp),
@@ -72,6 +111,9 @@ export async function fetchLiveWeatherSummary(
         condition: w.condition || conditionFrom(temp, rain),
         source: data.source || 'Backend',
         isBackend: true,
+        observationDate: display,
+        observationDateIso: iso,
+        utcHour: data.utc_hour,
       };
     }
   } catch {
@@ -98,6 +140,11 @@ export async function fetchLiveWeatherSummary(
     const temp = Number(c.temperature_2m ?? 0);
     const rain = Number(c.precipitation ?? 0);
     const cloud = Number(c.cloud_cover ?? 0);
+    const rawTime = String(c.time || '');
+    const { display, iso } = formatWeatherDate(
+      rawTime.slice(0, 10).replace(/-/g, '') || undefined,
+      rawTime.length >= 13 ? rawTime.slice(11, 13) : undefined,
+    );
     return {
       city,
       temperature: Math.round(temp),
@@ -109,6 +156,9 @@ export async function fetchLiveWeatherSummary(
       maxTemp: d.temperature_2m_max ? Math.round(Number(d.temperature_2m_max[0])) : undefined,
       source: 'Open-Meteo (client fallback)',
       isBackend: false,
+      observationDate: display,
+      observationDateIso: iso,
+      utcHour: rawTime.length >= 13 ? rawTime.slice(11, 13) : undefined,
     };
   } catch {
     return null;

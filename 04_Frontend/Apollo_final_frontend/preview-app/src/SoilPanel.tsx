@@ -360,8 +360,8 @@ export default function SoilPanel({
   }, [METRICS]);
 
   const updated = backendSoilReady
-    ? `Backend evaluate · ${sp?.type || 'soil'} · ${farmCtx?.evaluateReport?.location?.district || ''}`
-    : 'Waiting for POST /api/evaluate…';
+    ? `Evaluate · ${sp?.type || 'soil'} · ${farmCtx?.evaluateReport?.location?.district || ''}`
+    : 'Loading suitability profile…';
 
   const activeSoilId = setSoilClass ? soilClass : localSoil;
   const setActiveSoil = (id: SoilClassId) => {
@@ -388,13 +388,13 @@ export default function SoilPanel({
         }`}
       >
         <span className="font-bold uppercase tracking-wider">
-          {backendSoilReady ? 'Backend soil profile' : 'Awaiting evaluate'}
+          {backendSoilReady ? 'Soil profile' : 'Loading soil profile'}
         </span>
         <span className="text-slate-500">·</span>
         <span>
           {backendSoilReady
             ? `type ${sp?.type || '—'} · pH ${sp?.ph ?? '—'} · N ${sp?.n ?? '—'} · P ${sp?.p ?? '—'} · K ${sp?.k ?? '—'} · moisture ${sp?.moisture_pct ?? '—'}% · health ${(sp?.health_score ?? soilScore) || '—'} · ${live?.city || ''}`
-            : 'Run suitability (POST /api/evaluate) so this panel uses KnowledgeBase soil_profile'}
+            : 'Suitability engine will populate NPK, moisture & health from the farm evaluate report'}
         </span>
         {farmCtx && (
           <button

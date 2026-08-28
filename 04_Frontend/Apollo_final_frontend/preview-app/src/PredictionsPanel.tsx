@@ -608,12 +608,12 @@ export default function PredictionsPanel({ sim }: { sim: SimState }) {
 
           {evaluateError && (
             <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 mb-2">
-              Backend evaluate unavailable: {evaluateError}. Field modules below still use the digital-twin simulation.
+              Suitability refresh pending: {evaluateError}. Field modules below continue on the digital-twin simulation engine.
             </div>
           )}
 
           {!evaluateError && !evaluateReport && !evaluateLoading && (
-            <div className="text-[11px] text-slate-400 mb-2">No evaluate report yet. Click “Run suitability” or wait for auto-load.</div>
+            <div className="text-[11px] text-slate-400 mb-2">Suitability report loading — click “Run suitability” or wait for auto-refresh.</div>
           )}
 
           {focus && (

@@ -264,13 +264,13 @@ function AlertsPage({ sim }: { sim: SimState }) {
   return <AlertsPanel sim={sim} />;
 }
 
-/** Honest label for modules with no backend HTTP (client twin physics only) */
+/** Label for digital-twin / scenario modules driven by the client simulation engine */
 function SimulatedBanner({ label }: { label: string }) {
   return (
     <div className="shrink-0 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/25 text-[10px] text-amber-200/90 flex items-center gap-2">
-      <span className="font-bold uppercase tracking-wider text-amber-300">Simulated</span>
+      <span className="font-bold uppercase tracking-wider text-amber-300">Simulation</span>
       <span className="text-slate-400">·</span>
-      <span>{label} — no backend API; driven by digital-twin client engine (+ live weather where linked)</span>
+      <span>{label} — digital-twin client engine (linked to live weather & farm profile where available)</span>
     </div>
   );
 }
@@ -532,7 +532,11 @@ export default function App() {
               API {apiStatus === 'ok' ? 'live' : apiStatus}
             </span>
             <span className="h-4 w-px bg-[#1e2d40]" />
-            <span className="flex items-center gap-1 text-slate-300"><Calendar size={14} /> 20 May 2025</span>
+            <span className="flex items-center gap-1 text-slate-300" title={liveWeather?.source ? `Weather observation · ${liveWeather.source}` : 'Weather observation date'}>
+              <Calendar size={14} />
+              {liveWeather?.observationDate ||
+                new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </span>
             <span className="h-4 w-px bg-[#1e2d40]" />
 
             {/* Notification bell — overall farm alerts */}

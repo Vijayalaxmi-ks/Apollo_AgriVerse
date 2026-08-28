@@ -779,6 +779,9 @@ export type LiveWeatherSummary = {
   maxTemp?: number;
   source?: string;
   isBackend?: boolean;
+  observationDate?: string;
+  observationDateIso?: string;
+  utcHour?: string;
 };
 
 export default function WeatherPanel({
@@ -821,6 +824,33 @@ export default function WeatherPanel({
       const dayMax = week.length ? Math.max(...week.map((d) => d.tempMax)) : undefined;
       const dayMin = week.length ? Math.min(...week.map((d) => d.tempMin)) : undefined;
       const fromBackend = !String(curr.source || '').toLowerCase().includes('fallback');
+      const rawDate = String(curr.date || '');
+      let observationDate: string | undefined;
+      let observationDateIso: string | undefined;
+      if (rawDate) {
+        const digits = rawDate.replace(/\D/g, '');
+        if (digits.length >= 8) {
+          const y = digits.slice(0, 4);
+          const m = digits.slice(4, 6);
+          const d = digits.slice(6, 8);
+          observationDateIso = `${y}-${m}-${d}`;
+          const dt = new Date(`${observationDateIso}T12:00:00`);
+          if (!Number.isNaN(dt.getTime())) {
+            observationDate = dt.toLocaleDateString('en-IN', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+            });
+          }
+        }
+      }
+      if (!observationDate) {
+        observationDate = new Date().toLocaleDateString('en-IN', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        });
+      }
       onLiveWeather?.({
         city: curr.city || city.name,
         temperature: Math.round(cw.temperature_c),
@@ -832,7 +862,10 @@ export default function WeatherPanel({
         maxTemp: dayMax,
         source: curr.source,
         isBackend: fromBackend,
-      } as LiveWeatherSummary & { source?: string; isBackend?: boolean });
+        observationDate,
+        observationDateIso,
+        utcHour: curr.utc_hour,
+      } as LiveWeatherSummary);
     } catch (e: any) {
       setError(e?.message || 'Failed to fetch weather');
     } finally {
