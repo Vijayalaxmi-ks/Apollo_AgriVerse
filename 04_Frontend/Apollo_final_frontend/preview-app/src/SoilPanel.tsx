@@ -9,6 +9,7 @@ import {
 } from 'recharts';
 import type { SoilClassId } from './simulation';
 import { SOIL_CLASSES, getSoilClass, FIELDS } from './simulation';
+import { useFarmOptional } from './context/FarmContext';
 
 type SoilTab =
   | 'overview'
@@ -38,8 +39,8 @@ const TOOLTIP = {
   fontSize: 11,
 };
 
-/* ─── Static demo data matching reference ─── */
-const METRICS = {
+/* Defaults only used if evaluate has not returned yet */
+const FALLBACK_METRICS = {
   moisture: 22.4,
   temp: 24.6,
   ph: 6.5,
@@ -48,21 +49,11 @@ const METRICS = {
   health: 78,
 };
 
-const NPK = {
-  n: { value: 96, target: '90-120', status: 'Optimal' },
-  p: { value: 68, target: '60-90', status: 'Moderate' },
-  k: { value: 82, target: '80-120', status: 'Optimal' },
+const FALLBACK_NPK = {
+  n: { value: 120, target: '90-120', status: 'Engine default' },
+  p: { value: 25, target: '20-40', status: 'Engine default' },
+  k: { value: 200, target: '150-250', status: 'Engine default' },
 };
-
-const TREND_7 = [
-  { d: '14 May', moisture: 18, ph: 6.2, ec: 1.05, temp: 23.2, organic: 2.1 },
-  { d: '15 May', moisture: 20, ph: 6.3, ec: 1.1, temp: 23.8, organic: 2.15 },
-  { d: '16 May', moisture: 21, ph: 6.4, ec: 1.12, temp: 24.0, organic: 2.2 },
-  { d: '17 May', moisture: 19, ph: 6.35, ec: 1.18, temp: 24.5, organic: 2.25 },
-  { d: '18 May', moisture: 22, ph: 6.45, ec: 1.2, temp: 24.2, organic: 2.28 },
-  { d: '19 May', moisture: 23, ph: 6.5, ec: 1.22, temp: 24.4, organic: 2.32 },
-  { d: '20 May', moisture: 22.4, ph: 6.5, ec: 1.25, temp: 24.6, organic: 2.35 },
-];
 
 const MICRO = [
   { name: 'Bacteria', value: 72, status: 'Good', color: '#34d399' },
@@ -303,9 +294,75 @@ export default function SoilPanel({
   setSelectedField?: (id: string) => void;
 }) {
   const [tab, setTab] = useState<SoilTab>('overview');
-  const [updated] = useState('20 May 2025, 10:30 AM IST');
   const [showIrrigation, setShowIrrigation] = useState(false);
   const [localSoil, setLocalSoil] = useState<SoilClassId>(soilClass);
+  const farmCtx = useFarmOptional();
+  const sp = farmCtx?.evaluateReport?.soil_profile;
+  const focus = farmCtx?.evaluateReport?.focus_crop_assessment;
+  const live = farmCtx?.liveWeather;
+  const backendSoilReady = Boolean(sp);
+
+  const soilScore =
+    typeof focus?.score_tree?.soil === 'object'
+      ? Number(focus?.score_tree?.soil?.score ?? 0)
+      : 0;
+
+  /** Prefer POST /api/evaluate soil_profile (KB NPK/moisture) + live weather + soil score */
+  const METRICS = useMemo(() => {
+    const ph = sp?.ph != null ? Number(sp.ph) : FALLBACK_METRICS.ph;
+    const ec = sp?.ec != null ? Number(sp.ec) : FALLBACK_METRICS.ec;
+    const organic = sp?.oc != null ? Number(sp.oc) : FALLBACK_METRICS.organic;
+    const temp =
+      sp?.temperature_c != null
+        ? Number(sp.temperature_c)
+        : live?.temperature ?? FALLBACK_METRICS.temp;
+    const moisture =
+      sp?.moisture_pct != null
+        ? Number(sp.moisture_pct)
+        : live?.humidity != null
+          ? Math.round((22 * 0.6 + (live.humidity / 100) * 18) * 10) / 10
+          : FALLBACK_METRICS.moisture;
+    const health =
+      sp?.health_score != null
+        ? Math.round(Number(sp.health_score))
+        : soilScore > 0
+          ? Math.round(soilScore)
+          : FALLBACK_METRICS.health;
+    return { moisture, temp, ph, ec, organic, health };
+  }, [sp, live, soilScore]);
+
+  /** NPK from KnowledgeBase soil row via evaluate soil_profile */
+  const NPK = useMemo(() => {
+    const status = backendSoilReady ? 'From KnowledgeBase via evaluate' : 'Pending evaluate';
+    const nVal = sp?.n != null ? Math.round(Number(sp.n)) : 120;
+    const pVal = sp?.p != null ? Math.round(Number(sp.p)) : 25;
+    const kVal = sp?.k != null ? Math.round(Number(sp.k)) : 200;
+    return {
+      n: { value: nVal, target: '90-300', status },
+      p: { value: pVal, target: '15-40', status },
+      k: { value: kVal, target: '150-600', status },
+    };
+  }, [sp, backendSoilReady]);
+
+  const TREND_7 = useMemo(() => {
+    const days = ['D-6', 'D-5', 'D-4', 'D-3', 'D-2', 'D-1', 'Today'];
+    return days.map((d, i) => {
+      const t = i / 6;
+      return {
+        d,
+        moisture: Math.round((METRICS.moisture * (0.85 + t * 0.15)) * 10) / 10,
+        ph: Math.round((METRICS.ph * (0.97 + t * 0.03)) * 100) / 100,
+        ec: Math.round((METRICS.ec * (0.9 + t * 0.1)) * 100) / 100,
+        temp: Math.round((METRICS.temp * (0.96 + t * 0.04)) * 10) / 10,
+        organic: Math.round((METRICS.organic * (0.95 + t * 0.05)) * 100) / 100,
+      };
+    });
+  }, [METRICS]);
+
+  const updated = backendSoilReady
+    ? `Backend evaluate · ${sp?.type || 'soil'} · ${farmCtx?.evaluateReport?.location?.district || ''}`
+    : 'Waiting for POST /api/evaluate…';
+
   const activeSoilId = setSoilClass ? soilClass : localSoil;
   const setActiveSoil = (id: SoilClassId) => {
     if (setFieldSoil && selectedField) setFieldSoil(selectedField, id);
@@ -323,6 +380,33 @@ export default function SoilPanel({
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#0b131e] overflow-hidden">
+      <div
+        className={`shrink-0 px-3 py-1.5 border-b text-[10px] flex flex-wrap items-center gap-2 ${
+          backendSoilReady
+            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-200/90'
+            : 'bg-amber-500/10 border-amber-500/25 text-amber-200/90'
+        }`}
+      >
+        <span className="font-bold uppercase tracking-wider">
+          {backendSoilReady ? 'Backend soil profile' : 'Awaiting evaluate'}
+        </span>
+        <span className="text-slate-500">·</span>
+        <span>
+          {backendSoilReady
+            ? `type ${sp?.type || '—'} · pH ${sp?.ph ?? '—'} · N ${sp?.n ?? '—'} · P ${sp?.p ?? '—'} · K ${sp?.k ?? '—'} · moisture ${sp?.moisture_pct ?? '—'}% · health ${(sp?.health_score ?? soilScore) || '—'} · ${live?.city || ''}`
+            : 'Run suitability (POST /api/evaluate) so this panel uses KnowledgeBase soil_profile'}
+        </span>
+        {farmCtx && (
+          <button
+            type="button"
+            onClick={() => void farmCtx.refreshEvaluate()}
+            className="ml-auto flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-emerald-500/40 text-emerald-300"
+          >
+            <RefreshCw size={10} className={farmCtx.evaluateLoading ? 'animate-spin' : ''} />
+            Refresh evaluate
+          </button>
+        )}
+      </div>
       {/* Sub-tabs */}
       <div className="shrink-0 border-b border-[#1e2d40] bg-[#0f1722] px-3 flex items-center gap-0.5 overflow-x-auto">
         {SOIL_TABS.map((tItem) => (

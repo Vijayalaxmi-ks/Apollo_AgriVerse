@@ -4,9 +4,10 @@ import {
   Leaf, Beaker, Gauge, Shield, Smartphone, Moon, Sun, Volume2,
   Wifi, Database, User, Factory, Droplets, Thermometer, CheckCircle2,
   Layers, Zap, Eye, Lock, Globe, Cpu, Sparkles, ChevronRight,
-  Activity, Radio,
+  Activity, Radio, RefreshCw, Server,
 } from 'lucide-react';
 import type { SimState } from './simulation';
+import { useFarmOptional } from './context/FarmContext';
 
 type Units = 'metric' | 'imperial';
 type ThemeMode = 'dark' | 'oled' | 'midnight';
@@ -18,6 +19,14 @@ export type AppSettings = {
   region: string;
   district: string;
   cropDefault: string;
+  /** Backend evaluate identity */
+  farmId: string;
+  regionId: string;
+  soilId: string;
+  waterAvailability: string;
+  city: string;
+  latitude: number;
+  longitude: number;
   units: Units;
   language: Language;
   theme: ThemeMode;
@@ -47,8 +56,15 @@ const DEFAULTS: AppSettings = {
   farmName: 'Apollo Agriverse Demo Farm',
   operator: 'Farm Manager',
   region: 'Maharashtra',
-  district: 'Pune / Nashik belt',
+  district: 'Nashik',
   cropDefault: 'Grape (Thompson / Flame)',
+  farmId: 'FARM_MH_NASHIK_01',
+  regionId: 'REG_0002',
+  soilId: 'SOIL_00001',
+  waterAvailability: 'medium',
+  city: 'Nashik',
+  latitude: 19.9975,
+  longitude: 73.7898,
   units: 'metric',
   language: 'en',
   theme: 'dark',
@@ -106,6 +122,7 @@ export default function SettingsPanel({
   const [cfg, setCfg] = useState<AppSettings>(() => loadSettings());
   const [savedFlash, setSavedFlash] = useState(false);
   const [section, setSection] = useState<'farm' | 'sim' | 'alerts' | 'display' | 'data' | 'account'>('farm');
+  const farmCtx = useFarmOptional();
 
   useEffect(() => {
     try {
@@ -121,6 +138,21 @@ export default function SettingsPanel({
 
   const save = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+    // Push farm identity into shared FarmContext → triggers weather + evaluate
+    if (farmCtx) {
+      const next = {
+        farm_id: cfg.farmId,
+        region_id: cfg.regionId,
+        soil_id: cfg.soilId,
+        water_availability: cfg.waterAvailability,
+        latitude: cfg.latitude,
+        longitude: cfg.longitude,
+        city: cfg.city,
+        farmName: cfg.farmName,
+      };
+      farmCtx.saveFarm({ ...farmCtx.farm, ...next });
+      void farmCtx.refreshAll();
+    }
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 2000);
   };
@@ -437,6 +469,117 @@ export default function SettingsPanel({
                         value={cfg.cropDefault}
                         onChange={(e) => patch('cropDefault', e.target.value)}
                       />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-violet-500/20 bg-[#0c121c] overflow-hidden">
+                  <div className="px-5 py-4 border-b border-white/5 bg-gradient-to-r from-violet-500/10 via-transparent to-transparent flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/15 border border-violet-500/30">
+                        <Server size={14} className="text-violet-300" />
+                      </div>
+                      <div>
+                        <div className="text-[12px] font-bold text-white">Backend farm profile</div>
+                        <div className="text-[9px] text-slate-500">
+                          Drives POST /api/evaluate and GET /weather · {farmCtx?.apiBase || 'API'}
+                        </div>
+                      </div>
+                    </div>
+                    {farmCtx && (
+                      <span
+                        className={`text-[9px] px-2 py-0.5 rounded border ${
+                          farmCtx.apiStatus === 'ok'
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                            : farmCtx.apiStatus === 'degraded'
+                              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                              : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                        }`}
+                      >
+                        {farmCtx.apiStatus === 'ok'
+                          ? 'API ok'
+                          : farmCtx.apiStatus === 'degraded'
+                            ? 'Degraded'
+                            : farmCtx.apiStatus === 'down'
+                              ? 'Down'
+                              : 'Unknown'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {(
+                      [
+                        { key: 'farmId' as const, label: 'Farm ID' },
+                        { key: 'regionId' as const, label: 'Region ID' },
+                        { key: 'soilId' as const, label: 'Soil ID' },
+                        { key: 'city' as const, label: 'City (weather)' },
+                      ] as const
+                    ).map((f) => (
+                      <div key={f.key}>
+                        <div className={labelCls}>{f.label}</div>
+                        <input
+                          className={inputCls}
+                          value={cfg[f.key]}
+                          onChange={(e) => patch(f.key, e.target.value)}
+                        />
+                      </div>
+                    ))}
+                    <div>
+                      <div className={labelCls}>Water availability</div>
+                      <select
+                        className={inputCls}
+                        value={cfg.waterAvailability}
+                        onChange={(e) => patch('waterAvailability', e.target.value)}
+                      >
+                        <option value="low">low</option>
+                        <option value="medium">medium</option>
+                        <option value="high">high</option>
+                      </select>
+                    </div>
+                    <div>
+                      <div className={labelCls}>Latitude</div>
+                      <input
+                        className={inputCls}
+                        type="number"
+                        step="0.0001"
+                        value={cfg.latitude}
+                        onChange={(e) => patch('latitude', Number(e.target.value))}
+                      />
+                    </div>
+                    <div>
+                      <div className={labelCls}>Longitude</div>
+                      <input
+                        className={inputCls}
+                        type="number"
+                        step="0.0001"
+                        value={cfg.longitude}
+                        onChange={(e) => patch('longitude', Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="sm:col-span-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          save();
+                        }}
+                        className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-200"
+                      >
+                        <Save size={12} /> Save & refresh APIs
+                      </button>
+                      {farmCtx && (
+                        <button
+                          type="button"
+                          onClick={() => void farmCtx.refreshAll()}
+                          className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border border-[#1e2d40] text-slate-300"
+                        >
+                          <RefreshCw size={12} /> Re-check health
+                        </button>
+                      )}
+                      {farmCtx && (
+                        <span className="text-[10px] text-slate-500 self-center">
+                          {farmCtx.healthMessage}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

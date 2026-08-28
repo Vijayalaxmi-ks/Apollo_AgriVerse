@@ -2,10 +2,11 @@ import { useMemo, useState, useRef, useEffect, type ReactNode } from 'react';
 import {
   Brain, Shield, Droplets, Leaf, Hexagon, TrendingUp, Sun,
   Thermometer, CloudRain, Activity, CheckCircle2, Info,
-  Sparkles, ArrowRight,
+  Sparkles, ArrowRight, RefreshCw, Server,
 } from 'lucide-react';
 import type { SimState } from './simulation';
 import { STAGE_RANGES, FIELDS } from './simulation';
+import { useFarmOptional } from './context/FarmContext';
 
 
 /** Interactive tooltip — hover / focus / touch */
@@ -424,8 +425,15 @@ export default function PredictionsPanel({ sim }: { sim: SimState }) {
   const [module, setModule] = useState<ModuleId>('yield');
   const [selectedGrowthStage, setSelectedGrowthStage] = useState<string | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string>('all');
+  const farmCtx = useFarmOptional();
+  const evaluateReport = farmCtx?.evaluateReport ?? null;
+  const evaluateError = farmCtx?.evaluateError ?? null;
+  const evaluateLoading = farmCtx?.evaluateLoading ?? false;
+  const focus = evaluateReport?.focus_crop_assessment;
+  const recs = evaluateReport?.primary_recommendations ?? [];
+  const panel = 'bg-[#121a27] rounded-xl border border-[#1e2d40]';
 
-  /** Per-field prediction bundle for the 4 digital-twin fields */
+  /** Per-field prediction bundle for the 4 digital-twin fields (client simulation) */
   const fieldPredictions = useMemo(() => {
     const stageFactor =
       sim.day < 45 ? 0.55 : sim.day < 80 ? 0.75 : sim.day < 120 ? 0.92 : 1;
@@ -553,21 +561,267 @@ export default function PredictionsPanel({ sim }: { sim: SimState }) {
     });
   }, [yieldTons]);
 
-  const panel = 'bg-[#121a27] rounded-xl border border-[#1e2d40]';
   const activeMod = MODULES.find((m) => m.id === module)!;
 
   return (
     <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden bg-[#0b131e]">
       <div className="p-3 space-y-2.5">
         {/* Title */}
-        <div>
-          <h1 className="text-base font-bold tracking-wide">
-            <span className="text-violet-300">PREDICTIONS</span>
-          </h1>
-          <p className="text-[10px] text-slate-500">AI-Powered Forecasting · Smart Decisions · Better Outcomes</p>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h1 className="text-base font-bold tracking-wide">
+              <span className="text-violet-300">PREDICTIONS</span>
+            </h1>
+            <p className="text-[10px] text-slate-500">
+              Backend suitability engine + ML yield · Field modules remain simulation-assisted
+            </p>
+          </div>
+          {farmCtx && (
+            <button
+              type="button"
+              onClick={() => farmCtx.refreshEvaluate()}
+              disabled={evaluateLoading}
+              className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={evaluateLoading ? 'animate-spin' : ''} />
+              Run suitability
+            </button>
+          )}
         </div>
 
-        {/* Module selector + summary */}
+        {/* Backend evaluate (dynamic) */}
+        <div className={`${panel} p-3 border-violet-500/20`}>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <Server size={14} className="text-violet-300" />
+              <span className="text-[11px] font-bold text-violet-200 uppercase tracking-wide">
+                Crop suitability · Backend
+              </span>
+              {evaluateReport?.live_weather_applied && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  Live weather applied
+                </span>
+              )}
+            </div>
+            {evaluateLoading && <span className="text-[10px] text-slate-400">Loading…</span>}
+          </div>
+
+          {evaluateError && (
+            <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 mb-2">
+              Backend evaluate unavailable: {evaluateError}. Field modules below still use the digital-twin simulation.
+            </div>
+          )}
+
+          {!evaluateError && !evaluateReport && !evaluateLoading && (
+            <div className="text-[11px] text-slate-400 mb-2">No evaluate report yet. Click “Run suitability” or wait for auto-load.</div>
+          )}
+
+          {focus && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2.5">
+                <div className="text-[9px] text-slate-500">Focus crop</div>
+                <div className="text-sm font-semibold text-white">{focus.crop_name}</div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2.5">
+                <div className="text-[9px] text-slate-500">Suitability</div>
+                <div className="text-sm font-semibold text-emerald-400">
+                  {focus.final_suitability_score?.toFixed?.(1) ?? focus.final_suitability_score}%
+                </div>
+                <div className="text-[9px] text-slate-400">{focus.suitability_band}</div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2.5">
+                <div className="text-[9px] text-slate-500">ML yield (t/ha)</div>
+                <div className="text-sm font-semibold text-cyan-300">
+                  {focus.expected_yield_tons_ha != null
+                    ? Number(focus.expected_yield_tons_ha).toFixed(2)
+                    : '—'}
+                </div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2.5">
+                <div className="text-[9px] text-slate-500">Location</div>
+                <div className="text-sm font-semibold text-white truncate">
+                  {evaluateReport?.location?.district || '—'}, {evaluateReport?.location?.state || ''}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* score_tree bars — climate / soil / water / market */}
+          {focus?.score_tree && (
+            <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+              {(
+                [
+                  { key: 'climate', label: 'Climate', color: 'bg-sky-500', score: focus.score_tree.climate?.score },
+                  { key: 'soil', label: 'Soil', color: 'bg-amber-500', score: focus.score_tree.soil?.score },
+                  { key: 'water', label: 'Water', color: 'bg-cyan-500', score: typeof focus.score_tree.water === 'object' ? focus.score_tree.water?.score : focus.score_tree.water },
+                  { key: 'market', label: 'Market', color: 'bg-violet-500', score: focus.score_tree.market?.score },
+                ] as const
+              ).map((row) => {
+                const s = Number(row.score ?? 0);
+                return (
+                  <div key={row.key} className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2.5">
+                    <div className="flex justify-between text-[10px] mb-1">
+                      <span className="text-slate-400">{row.label}</span>
+                      <span className="text-white font-semibold">{Number.isFinite(s) ? s.toFixed(1) : '—'}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-[#1e2d40] overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${row.color}`}
+                        style={{ width: `${Math.min(100, Math.max(0, s))}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* pros / cons from focus assessment */}
+          {focus && ((focus.pros && focus.pros.length > 0) || (focus.cons && focus.cons.length > 0)) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+              <div className="bg-emerald-500/5 border border-emerald-500/25 rounded-lg p-2.5">
+                <div className="text-[10px] font-bold text-emerald-300 mb-1.5 uppercase">Pros (engine)</div>
+                <ul className="space-y-1">
+                  {(focus.pros || []).slice(0, 8).map((p, i) => (
+                    <li key={i} className="text-[11px] text-slate-300 flex gap-1.5">
+                      <span className="text-emerald-400 shrink-0">+</span>
+                      <span>{p}</span>
+                    </li>
+                  ))}
+                  {!(focus.pros && focus.pros.length) && (
+                    <li className="text-[11px] text-slate-500">None listed</li>
+                  )}
+                </ul>
+              </div>
+              <div className="bg-rose-500/5 border border-rose-500/25 rounded-lg p-2.5">
+                <div className="text-[10px] font-bold text-rose-300 mb-1.5 uppercase">Cons (engine)</div>
+                <ul className="space-y-1">
+                  {(focus.cons || []).slice(0, 8).map((c, i) => (
+                    <li key={i} className="text-[11px] text-slate-300 flex gap-1.5">
+                      <span className="text-rose-400 shrink-0">−</span>
+                      <span>{c}</span>
+                    </li>
+                  ))}
+                  {!(focus.cons && focus.cons.length) && (
+                    <li className="text-[11px] text-slate-500">None listed</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* Backend soil_profile snapshot */}
+          {evaluateReport?.soil_profile && (
+            <div className="mb-3 flex flex-wrap gap-2 text-[11px]">
+              <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                Soil: <strong className="text-white">{evaluateReport.soil_profile.type || '—'}</strong>
+              </span>
+              <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                pH: <strong className="text-white">{evaluateReport.soil_profile.ph ?? '—'}</strong>
+              </span>
+              <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                OC: <strong className="text-white">{evaluateReport.soil_profile.oc ?? '—'}</strong>
+              </span>
+              <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                EC: <strong className="text-white">{evaluateReport.soil_profile.ec ?? '—'}</strong>
+              </span>
+              {evaluateReport.soil_profile.n != null && (
+                <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                  N: <strong className="text-white">{evaluateReport.soil_profile.n}</strong>
+                </span>
+              )}
+              {evaluateReport.soil_profile.p != null && (
+                <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                  P: <strong className="text-white">{evaluateReport.soil_profile.p}</strong>
+                </span>
+              )}
+              {evaluateReport.soil_profile.k != null && (
+                <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                  K: <strong className="text-white">{evaluateReport.soil_profile.k}</strong>
+                </span>
+              )}
+              {evaluateReport.soil_profile.moisture_pct != null && (
+                <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                  Moisture: <strong className="text-white">{evaluateReport.soil_profile.moisture_pct}%</strong>
+                </span>
+              )}
+              <span className="px-2 py-1 rounded border border-[#1e2d40] bg-[#0b131e] text-slate-300">
+                Water: <strong className="text-white">{evaluateReport.water_availability || '—'}</strong>
+              </span>
+            </div>
+          )}
+
+          {recs.length > 0 && (
+            <div className="overflow-x-auto mb-3">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-slate-500 border-b border-[#1e2d40] text-left">
+                    <th className="py-1.5 pr-2 font-medium">Crop</th>
+                    <th className="py-1.5 pr-2 font-medium">Score</th>
+                    <th className="py-1.5 pr-2 font-medium">Band</th>
+                    <th className="py-1.5 pr-2 font-medium">Water</th>
+                    <th className="py-1.5 font-medium">Market trend</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recs.map((r) => (
+                    <tr key={r.crop_name} className="border-b border-[#1e2d40]/60">
+                      <td className="py-1.5 pr-2 text-white font-medium">
+                        {r.crop_name}
+                        {r.is_focus_crop && (
+                          <span className="ml-1 text-[9px] text-violet-300">focus</span>
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-2 text-emerald-400">
+                        {r.final_suitability_score?.toFixed?.(1) ?? r.final_suitability_score}
+                      </td>
+                      <td className="py-1.5 pr-2 text-slate-300">{r.suitability_band || '—'}</td>
+                      <td className="py-1.5 pr-2 text-slate-400">{r.water_requirement || '—'}</td>
+                      <td className="py-1.5 text-slate-400">
+                        {r.score_tree?.market?.trend || '—'}
+                        {r.score_tree?.market?.modal_price != null &&
+                          ` · ₹${r.score_tree.market.modal_price}/qtl`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Disqualified crops from engine */}
+          {(evaluateReport?.disqualified_crops?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5">
+              <div className="text-[10px] font-bold text-amber-300 uppercase mb-1.5">
+                Disqualified crops (below agronomic threshold)
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="text-slate-500 text-left border-b border-[#1e2d40]">
+                      <th className="py-1 pr-2 font-medium">Crop</th>
+                      <th className="py-1 pr-2 font-medium">Score</th>
+                      <th className="py-1 font-medium">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {evaluateReport!.disqualified_crops!.map((d) => (
+                      <tr key={d.crop_name} className="border-b border-[#1e2d40]/50">
+                        <td className="py-1 pr-2 text-slate-200">{d.crop_name}</td>
+                        <td className="py-1 pr-2 text-amber-300">
+                          {d.agronomic_score != null ? Number(d.agronomic_score).toFixed(1) : '—'}
+                        </td>
+                        <td className="py-1 text-slate-400">{d.reason || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Module selector + summary (simulation-assisted) */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-2">
           <div className={`${panel} p-3 xl:col-span-9`}>
             <div className="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wide">Select Prediction Module</div>

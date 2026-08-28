@@ -7,6 +7,9 @@ import {
 } from 'lucide-react';
 import type { SimState } from './simulation';
 import { FIELDS } from './simulation';
+import { useFarmOptional } from './context/FarmContext';
+import type { EvaluateReport } from './api/evaluate';
+import type { LiveWeatherSummary } from './api/weather';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
@@ -99,32 +102,105 @@ function mapSimSeverity(s: string): Severity {
 }
 
 /** Always produce a full farm + per-field alert feed (never empty under normal filters). */
-function buildRichAlerts(sim: SimState): AlertItem[] {
+function buildRichAlerts(
+  sim: SimState,
+  opts?: { liveWeather?: LiveWeatherSummary | null; evaluateReport?: EvaluateReport | null },
+): AlertItem[] {
   const items: AlertItem[] = [];
   const env = sim.env;
+  const wx = opts?.liveWeather;
+  const report = opts?.evaluateReport;
+  const temp = wx?.temperature ?? env.temperature;
+  const humidity = wx?.humidity ?? env.humidity;
+  const rainfall = wx?.rainfall ?? env.rainfall;
+  const wind = wx?.windKmh ?? env.windSpeed;
+  const wxSource = wx?.isBackend ? 'Backend /weather' : wx ? 'Weather fallback' : 'Weather twin';
   let n = 0;
   const id = () => `al-${++n}`;
 
-  // ── Farm-wide weather ──
-  if (env.temperature >= 34) {
+  // ── Backend evaluate-driven alerts (highest priority) ──
+  const focus = report?.focus_crop_assessment;
+  if (focus && typeof focus.final_suitability_score === 'number') {
+    if (focus.final_suitability_score < 70) {
+      items.push({
+        id: id(),
+        severity: focus.final_suitability_score < 55 ? 'high' : 'medium',
+        title: `${focus.crop_name} suitability ${focus.final_suitability_score.toFixed(1)}% (${focus.suitability_band || 'Marginal'})`,
+        detail: (focus.cons || []).slice(0, 3).join(' · ') || 'Engine scored this crop below the preferred band for current region/soil/weather.',
+        field: report?.location?.district || 'Farm-wide',
+        category: 'crop',
+        age: 'Just now',
+        metric: `${focus.final_suitability_score.toFixed(1)}%`,
+        action: 'Review Recommendations in Predictions · adjust water_availability or soil_id in Settings',
+        source: 'Backend /api/evaluate',
+      });
+    }
+    const soilScore = typeof focus.score_tree?.soil === 'object' ? Number(focus.score_tree?.soil?.score ?? 0) : 0;
+    if (soilScore > 0 && soilScore < 65) {
+      items.push({
+        id: id(),
+        severity: 'medium',
+        title: `Soil score low (${soilScore.toFixed(0)}%) for ${focus.crop_name}`,
+        detail: `Engine soil vector is weak. Profile: ${report?.soil_profile?.type || '—'} · pH ${report?.soil_profile?.ph ?? '—'} · N ${report?.soil_profile?.n ?? '—'}`,
+        field: 'Farm-wide',
+        category: 'soil',
+        age: 'Just now',
+        metric: `${soilScore.toFixed(0)}%`,
+        action: 'Check Soil panel · consider soil amendment plan',
+        source: 'Backend /api/evaluate',
+      });
+    }
+  }
+  const disq = report?.disqualified_crops || [];
+  if (disq.length > 0) {
     items.push({
       id: id(),
-      severity: env.temperature >= 38 ? 'critical' : 'high',
+      severity: 'info',
+      title: `${disq.length} crop(s) disqualified by agronomic threshold`,
+      detail: disq.slice(0, 4).map((d) => `${d.crop_name} (${d.agronomic_score ?? '—'})`).join(' · '),
+      field: 'Farm-wide',
+      category: 'crop',
+      age: 'Just now',
+      action: 'See Predictions → Disqualified list',
+      source: 'Backend /api/evaluate',
+    });
+  }
+  const sp = report?.soil_profile;
+  if (sp?.moisture_pct != null && Number(sp.moisture_pct) < 18) {
+    items.push({
+      id: id(),
+      severity: Number(sp.moisture_pct) < 14 ? 'high' : 'medium',
+      title: `KnowledgeBase soil moisture ${sp.moisture_pct}%`,
+      detail: `Backend soil row reports low moisture for ${sp.type || 'profile'} (id ${sp.soil_id || '—'}).`,
+      field: 'Farm-wide',
+      category: 'soil',
+      age: 'Just now',
+      metric: `${sp.moisture_pct}%`,
+      action: 'Schedule irrigation · open Soil panel',
+      source: 'Backend soil_profile',
+    });
+  }
+
+  // ── Farm-wide weather (prefer live backend values) ──
+  if (temp >= 34) {
+    items.push({
+      id: id(),
+      severity: temp >= 38 ? 'critical' : 'high',
       title: 'Heat stress threshold exceeded',
-      detail: `Air temperature ${env.temperature}°C is above the safe canopy band (24–32°C). Berry scorch and stomatal closure risk are elevated on west-facing rows.`,
+      detail: `Air temperature ${temp}°C is above the safe canopy band (24–32°C). Berry scorch and stomatal closure risk are elevated on west-facing rows.`,
       field: 'Farm-wide',
       category: 'weather',
       age: 'Just now',
-      metric: `${env.temperature}°C`,
+      metric: `${temp}°C`,
       action: 'Deploy shade net · increase afternoon drip pulse on Fields A & C',
-      source: 'Weather twin',
+      source: wxSource,
     });
-  } else if (env.temperature >= 31) {
+  } else if (temp >= 31) {
     items.push({
       id: id(),
       severity: 'medium',
       title: 'Warm conditions — watch heat buildup',
-      detail: `Temperature ${env.temperature}°C is approaching the upper comfort band. Peak afternoon hours may still stress fruiting vines.`,
+      detail: `Temperature ${temp}°C is approaching the upper comfort band. Peak afternoon hours may still stress fruiting vines.`,
       field: 'Farm-wide',
       category: 'weather',
       age: '4 min ago',
@@ -564,8 +640,13 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [acked, setAcked] = useState<Set<string>>(new Set());
 
+  const farmCtx = useFarmOptional();
   const allAlerts = useMemo(
-    () => buildRichAlerts(sim),
+    () =>
+      buildRichAlerts(sim, {
+        liveWeather: farmCtx?.liveWeather,
+        evaluateReport: farmCtx?.evaluateReport,
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       sim.env.temperature,
@@ -583,6 +664,8 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
       sim.day,
       sim.stage,
       sim.stageProgress,
+      farmCtx?.liveWeather,
+      farmCtx?.evaluateReport,
     ],
   );
 
@@ -658,14 +741,14 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
                   ALERT <span className="bg-gradient-to-r from-rose-300 to-violet-300 bg-clip-text text-transparent">COMMAND</span>
                 </h1>
                 <p className="text-[10px] text-slate-400">
-                  Weather · soil · crop · irrigation · system · all 4 fields
+                  Backend weather + evaluate · twin field sensors · irrigation · system
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] text-emerald-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Live monitoring
+                Backend-linked monitoring
               </span>
               <span className="rounded-full border border-[#1e2d40] bg-[#0b131e] px-2.5 py-1 text-[10px] text-slate-300 font-semibold">
                 {counts.open} open · {counts.total} total

@@ -11,6 +11,7 @@ class KnowledgeBaseLoader:
   def __init__(self, datasets_dir: str = None):
     project_root = Path(__file__).resolve().parent.parent.parent
 
+    self.data_dir = None
     if datasets_dir is None:
       possible_paths = [
           project_root
@@ -18,13 +19,18 @@ class KnowledgeBaseLoader:
           / "KnowledgeBase"
           / "Suitability engine csvs",
           project_root / "02_Datasets",
+          Path(__file__).resolve().parent.parent / "02_Datasets",
       ]
       for p in possible_paths:
         if p.exists():
           self.data_dir = p
           break
     else:
-      self.data_dir = project_root / datasets_dir
+      candidate = Path(datasets_dir)
+      self.data_dir = candidate if candidate.is_absolute() else (project_root / datasets_dir)
+    if self.data_dir is None or not Path(self.data_dir).exists():
+      # Leave unset; load_and_validate will raise a clear error
+      self.data_dir = Path(datasets_dir) if datasets_dir else (project_root / "02_Datasets")
 
     self.crops_df = None
     self.varieties_df = None
@@ -61,9 +67,60 @@ class KnowledgeBaseLoader:
       raise
 
     self._normalize_data()
+    self._alias_columns()
     self._validate_keys()
     logger.info("✅ Maharashtra Knowledge Base tables successfully loaded.")
     return self
+
+  def _alias_columns(self):
+    """Map KnowledgeBase column names to names the suitability engine expects."""
+    if self.crops_df is not None and not self.crops_df.empty:
+      ren = {}
+      cols = {c.lower(): c for c in self.crops_df.columns}
+      def pick(*names, dest):
+        for n in names:
+          if n.lower() in cols and dest not in self.crops_df.columns:
+            ren[cols[n.lower()]] = dest
+            return
+      pick("opt_temp_min", "ideal_temp_min", "temperature_min_c", "min_temp_c", dest="ideal_temp_min")
+      pick("opt_temp_max", "ideal_temp_max", "temperature_max_c", "max_temp_c", dest="ideal_temp_max")
+      pick("ph_min", "min_ph", dest="min_ph")
+      pick("ph_max", "max_ph", dest="max_ph")
+      pick("water_requirement_l_day", "water_requirement", dest="water_requirement")
+      pick("preferred_soil_type", "soil_type", dest="preferred_soil_type")
+      if ren:
+        self.crops_df = self.crops_df.rename(columns=ren)
+
+    if self.soils_df is not None and not self.soils_df.empty:
+      ren = {}
+      cols = {c.lower(): c for c in self.soils_df.columns}
+      mapping = {
+        "organic_carbon_pct": "organic_carbon",
+        "organic_carbon": "organic_carbon",
+        "electrical_conductivity_ds_m": "electrical_conductivity",
+        "nitrogen_mg_kg": "n",
+        "phosphorus_mg_kg": "p",
+        "potassium_mg_kg": "k",
+      }
+      for src, dest in mapping.items():
+        if src in cols and dest not in self.soils_df.columns:
+          ren[cols[src]] = dest
+      if ren:
+        self.soils_df = self.soils_df.rename(columns=ren)
+
+    if self.regions_df is not None and not self.regions_df.empty:
+      ren = {}
+      cols = {c.lower(): c for c in self.regions_df.columns}
+      mapping = {
+        "minimum_temperature_c": "avg_temp_min",
+        "maximum_temperature_c": "avg_temp_max",
+        "average_temperature_c": "avg_temp",
+      }
+      for src, dest in mapping.items():
+        if src in cols and dest not in self.regions_df.columns:
+          ren[cols[src]] = dest
+      if ren:
+        self.regions_df = self.regions_df.rename(columns=ren)
 
   def _normalize_data(self):
     for df_name in ["crops_df", "varieties_df", "soils_df", "requirements_df", "regions_df"]:

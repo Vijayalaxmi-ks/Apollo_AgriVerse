@@ -263,6 +263,22 @@ class connectSuitabilityEngine:
 
         return {
             "location": {"district": str(region_info.get("district", "Unknown")), "state": str(region_info.get("state", self.state_scope)), "region_id": str(region_info.get("region_id", ""))},
-            "soil_profile": {"type": str(self._first_value(soil_info, ["soil_type", "soil_name", "texture"], "Unknown")), "soil_id": str(soil_info.get("soil_id", "")), "ph": self._numeric(soil_info, ["ph", "pH"], 7.2), "oc": self._numeric(soil_info, ["oc", "organic_carbon"], None), "ec": self._numeric(soil_info, ["ec", "electrical_conductivity"], None)},
+            "soil_profile": {
+                "type": str(self._first_value(soil_info, ["soil_type", "soil_name", "texture"], "Unknown")),
+                "soil_id": str(soil_info.get("soil_id", "")),
+                "ph": self._numeric(soil_info, ["ph", "pH"], 7.2),
+                "oc": self._numeric(soil_info, ["oc", "organic_carbon", "organic_carbon_pct"], None),
+                "ec": self._numeric(soil_info, ["ec", "electrical_conductivity", "electrical_conductivity_ds_m"], None),
+                "n": self._numeric(soil_info, ["n", "nitrogen", "nitrogen_mgkg", "nitrogen_mg_kg"], None),
+                "p": self._numeric(soil_info, ["p", "phosphorus", "phosphorus_mgkg", "phosphorus_mg_kg"], None),
+                "k": self._numeric(soil_info, ["k", "potassium", "potassium_mgkg", "potassium_mg_kg"], None),
+                "moisture_pct": self._numeric(soil_info, ["soil_moisture_pct", "moisture", "moisture_pct"], None),
+                "temperature_c": self._numeric(soil_info, ["soil_temperature_c", "temperature_c"], None),
+                "health_score": self._numeric(soil_info, ["soil_health_score", "health_score"], None),
+                "texture": str(self._first_value(soil_info, ["soil_texture", "texture"], "") or ""),
+                "sand_pct": self._numeric(soil_info, ["sand_pct"], None),
+                "silt_pct": self._numeric(soil_info, ["silt_pct"], None),
+                "clay_pct": self._numeric(soil_info, ["clay_pct"], None),
+            },
             "water_availability": water_avail, "live_weather_applied": live_weather, "focus_crop": self.focus_crop, "focus_crop_assessment": focus_record, "primary_recommendations": ranked_recs[:top_n], "disqualified_crops": disqualified,
         }

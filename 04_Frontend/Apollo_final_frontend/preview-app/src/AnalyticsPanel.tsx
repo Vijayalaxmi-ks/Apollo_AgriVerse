@@ -218,6 +218,24 @@ function AnalyticsPanelInner({
   const [selectedFieldId, setSelectedFieldId] = useState<string>('all');
   const [harvestNotice, setHarvestNotice] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
+  const [backendSpot, setBackendSpot] = useState<{
+    modal: number;
+    min: number;
+    max: number;
+    trend: string;
+    source: string;
+    is_live: boolean;
+  } | null>(null);
+  const [backendArb, setBackendArb] = useState<{
+    spread_pct: number;
+    action: string;
+    message: string;
+    local_qtl: number;
+    net_export: number;
+    source: string;
+    is_live: boolean;
+  } | null>(null);
+  const [marketLoading, setMarketLoading] = useState(false);
   const cities = getCities(state);
   // Grape varieties always listed first (priority), then other crops
   const crops = useMemo(() => {
@@ -452,8 +470,80 @@ function AnalyticsPanelInner({
   const vsProfit = activeField?.vsProfit ?? fieldAnalytics[0]?.vsProfit ?? 0;
   const vsCost = activeField?.vsCost ?? fieldAnalytics[0]?.vsCost ?? 0;
 
-  const arbitrage = useMemo(() => evaluateMarketArbitrage(crop, state, city), [crop, state, city]);
-  const marketRows = useMemo(() => getMarketTableForCrop(crop, state, city), [crop, state, city]);
+  // Prefer backend market APIs; keep local helpers as structure fallback only
+  useEffect(() => {
+    let cancelled = false;
+    const core = crop.split('(')[0].replace(/Grape/i, 'GRAPE').trim().toUpperCase().split(/\s+/)[0] || 'GRAPE';
+    setMarketLoading(true);
+    (async () => {
+      try {
+        const { fetchMarketSpot, fetchMarketArbitrage } = await import('./api/market');
+        const [spot, arb] = await Promise.all([
+          fetchMarketSpot(core, state, city),
+          fetchMarketArbitrage(core, state, city),
+        ]);
+        if (cancelled) return;
+        setBackendSpot({
+          modal: spot.modal_price_per_qtl,
+          min: spot.min_price_per_qtl,
+          max: spot.max_price_per_qtl,
+          trend: spot.price_trend,
+          source: spot.source,
+          is_live: spot.is_live,
+        });
+        setBackendArb({
+          spread_pct: arb.spread_percentage,
+          action: arb.action_tag,
+          message: arb.directive_message,
+          local_qtl: arb.local_spot_price_quintal_inr,
+          net_export: arb.net_export_value_inr,
+          source: arb.source,
+          is_live: arb.is_live,
+        });
+      } catch {
+        if (!cancelled) {
+          setBackendSpot(null);
+          setBackendArb(null);
+        }
+      } finally {
+        if (!cancelled) setMarketLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [crop, state, city]);
+
+  const arbitrageLocal = useMemo(() => evaluateMarketArbitrage(crop, state, city), [crop, state, city]);
+  const arbitrage = backendArb
+    ? {
+        ...arbitrageLocal,
+        status: 'SUCCESS' as const,
+        local_spot_price_quintal_inr: backendArb.local_qtl,
+        local_spot_price_ton_inr: backendArb.local_qtl * 10,
+        net_export_value_inr: backendArb.net_export,
+        spread_percentage: backendArb.spread_pct,
+        arbitrage_spread_inr_ton: backendArb.net_export - backendArb.local_qtl * 10,
+        action_tag: backendArb.action,
+        directive_message: backendArb.message,
+      }
+    : arbitrageLocal;
+  const marketRowsLocal = useMemo(() => getMarketTableForCrop(crop, state, city), [crop, state, city]);
+  const marketRows = backendSpot
+    ? [
+        {
+          variety: crop,
+          market: city || state,
+          district: city || '—',
+          priceQtl: backendSpot.modal,
+          priceKg: Math.round((backendSpot.modal / 100) * 100) / 100,
+          min: backendSpot.min,
+          max: backendSpot.max,
+          trend7d: backendSpot.trend === 'UPWARD' ? 4.2 : backendSpot.trend === 'DOWNWARD' ? -2.1 : 0.8,
+        },
+        ...marketRowsLocal.slice(0, 4),
+      ]
+    : marketRowsLocal;
 
   const gradeA = +(totalYield * 0.6).toFixed(2);
   const gradeB = +(totalYield * 0.3).toFixed(2);
@@ -606,11 +696,32 @@ function AnalyticsPanelInner({
       <div className="p-5 md:p-7 space-y-6 max-w-[1400px]">
         {/* Page header */}
         <div className="pb-3 border-b border-[#1e2d40]">
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white">
-            Analytics & Insights
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-white">
+              Analytics & Insights
+            </h1>
+            {marketLoading && (
+              <span className="text-[10px] px-2 py-0.5 rounded border border-slate-600 text-slate-400">Loading market…</span>
+            )}
+            {!marketLoading && backendSpot && (
+              <span
+                className={`text-[10px] px-2 py-0.5 rounded border ${
+                  backendSpot.is_live
+                    ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
+                    : 'border-cyan-500/40 text-cyan-300 bg-cyan-500/10'
+                }`}
+              >
+                Market · {backendSpot.is_live ? 'Live Agmarknet' : 'Backend baseline'} ({backendSpot.source})
+              </span>
+            )}
+            {!marketLoading && !backendSpot && (
+              <span className="text-[10px] px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 bg-amber-500/10">
+                Market · offline fallback
+              </span>
+            )}
+          </div>
           <p className="text-[14px] md:text-[15px] text-slate-300 mt-2 leading-relaxed">
-            Real-time farm data · Cost & profit by field · Variety · Soil · Weather · Agmarknet prices
+            Backend market prices · Cost & profit by field (twin) · Variety · Soil · Weather
           </p>
         </div>
 

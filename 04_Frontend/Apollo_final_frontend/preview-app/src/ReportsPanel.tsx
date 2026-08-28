@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   FileText, Download, CloudRain, Layers, Leaf, Beaker, Box,
   BrainCircuit, BarChart2, AlertTriangle, Activity, CheckCircle2,
   Thermometer, Droplets, Wind, Sun, TrendingUp, DollarSign,
-  MapPin, Calendar, Sparkles, Shield, Gauge, Sprout,
+  MapPin, Calendar, Sparkles, Shield, Gauge, Sprout, Server, RefreshCw,
 } from 'lucide-react';
 import type { SimState } from './simulation';
 import { FIELDS, STAGE_RANGES } from './simulation';
@@ -12,6 +12,8 @@ import {
   computeFieldConstraints,
   SEASONS,
 } from './marketData';
+import { useFarmOptional } from './context/FarmContext';
+import { fetchMarketSpot } from './api/market';
 
 function formatInr(n: number): string {
   if (n >= 1e7) return `₹${(n / 1e7).toFixed(2)} Cr`;
@@ -28,7 +30,32 @@ function scoreLabel(s: number): { text: string; color: string } {
 
 export default function ReportsPanel({ sim }: { sim: SimState }) {
   const [season] = useState(SEASONS[1] || 'Rabi 2024-25');
+  const farmCtx = useFarmOptional();
+  const [marketModal, setMarketModal] = useState<number | null>(null);
+  const [marketSource, setMarketSource] = useState<string>('');
   const farmAcres = FIELDS.reduce((s, f) => s + f.acres, 0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const city = farmCtx?.farm.city || 'Nashik';
+        const spot = await fetchMarketSpot('GRAPE', 'Maharashtra', city);
+        if (!cancelled) {
+          setMarketModal(spot.modal_price_per_qtl);
+          setMarketSource(spot.is_live ? 'Live Agmarknet' : spot.source || 'Backend baseline');
+        }
+      } catch {
+        if (!cancelled) {
+          setMarketModal(null);
+          setMarketSource('unavailable');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [farmCtx?.farm.city]);
 
   const report = useMemo(() => {
     const env = sim.env;
@@ -382,6 +409,69 @@ export default function ReportsPanel({ sim }: { sim: SimState }) {
               >
                 <Download size={13} /> Export report
               </button>
+            </div>
+          </div>
+
+          {/* Backend live snapshot */}
+          <div className="relative mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-300 uppercase tracking-wide">
+                <Server size={14} /> Backend snapshot
+              </div>
+              {farmCtx && (
+                <button
+                  type="button"
+                  onClick={() => void farmCtx.refreshAll()}
+                  className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-emerald-500/40 text-emerald-200"
+                >
+                  <RefreshCw size={10} className={farmCtx.evaluateLoading || farmCtx.weatherLoading ? 'animate-spin' : ''} />
+                  Refresh APIs
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                <div className="text-[9px] text-slate-500">Weather</div>
+                <div className="text-white font-semibold">
+                  {farmCtx?.liveWeather
+                    ? `${farmCtx.liveWeather.city} · ${farmCtx.liveWeather.temperature}°C · ${farmCtx.liveWeather.humidity}%`
+                    : '—'}
+                </div>
+                <div className="text-[9px] text-slate-500">
+                  {farmCtx?.liveWeather?.isBackend ? 'GET /weather' : farmCtx?.liveWeather ? 'fallback' : 'pending'}
+                </div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                <div className="text-[9px] text-slate-500">Suitability (evaluate)</div>
+                <div className="text-white font-semibold">
+                  {farmCtx?.evaluateReport?.focus_crop_assessment
+                    ? `${farmCtx.evaluateReport.focus_crop_assessment.crop_name} · ${Number(farmCtx.evaluateReport.focus_crop_assessment.final_suitability_score).toFixed(1)}%`
+                    : farmCtx?.evaluateError
+                      ? 'Error'
+                      : '—'}
+                </div>
+                <div className="text-[9px] text-slate-500">
+                  {farmCtx?.evaluateReport?.location?.district || 'POST /api/evaluate'}
+                </div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                <div className="text-[9px] text-slate-500">Soil profile</div>
+                <div className="text-white font-semibold truncate">
+                  {farmCtx?.evaluateReport?.soil_profile
+                    ? `${farmCtx.evaluateReport.soil_profile.type} · pH ${farmCtx.evaluateReport.soil_profile.ph ?? '—'}`
+                    : '—'}
+                </div>
+                <div className="text-[9px] text-slate-500">
+                  N {farmCtx?.evaluateReport?.soil_profile?.n ?? '—'} · moisture {farmCtx?.evaluateReport?.soil_profile?.moisture_pct ?? '—'}%
+                </div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                <div className="text-[9px] text-slate-500">Market (GRAPE)</div>
+                <div className="text-white font-semibold">
+                  {marketModal != null ? `₹${marketModal}/qtl` : '—'}
+                </div>
+                <div className="text-[9px] text-slate-500">{marketSource || 'GET /api/market/spot'}</div>
+              </div>
             </div>
           </div>
 

@@ -9,6 +9,8 @@ import {
   CartesianGrid, Tooltip, Legend, Area, AreaChart, BarChart, RadarChart,
   PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
+import { API_BASE } from './api/client';
+import { fetchBackendWeatherRaw } from './api/weather';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface WeatherData {
@@ -315,21 +317,13 @@ const WeatherIcon = ({ type, size = 20, className = '' }: { type: string; size?:
   return <Sun size={size} className={className || 'text-amber-400'} />;
 };
 
-/* ─── Backend API ───────────────────────────────────────────────────────── */
-const WEATHER_API_BASE =
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_WEATHER_API) ||
-  'http://127.0.0.1:8000';
+/* ─── Backend API (shared client) ───────────────────────────────────────── */
+const WEATHER_API_BASE = API_BASE;
 
 async function fetchBackendWeather(cityName: string): Promise<WeatherResponse | null> {
   try {
-    const url = `${WEATHER_API_BASE}/weather?city=${encodeURIComponent(cityName)}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data || data.status === 'error') return null;
+    const data = await fetchBackendWeatherRaw(cityName);
+    if (!data) return null;
     const w = data.weather || {};
     const temp = Number(w.temperature_c ?? 0);
     const rain = Number(w.rainfall_mm ?? 0);
@@ -783,6 +777,8 @@ export type LiveWeatherSummary = {
   condition: string;
   minTemp?: number;
   maxTemp?: number;
+  source?: string;
+  isBackend?: boolean;
 };
 
 export default function WeatherPanel({
@@ -824,6 +820,7 @@ export default function WeatherPanel({
       const cw = curr.weather;
       const dayMax = week.length ? Math.max(...week.map((d) => d.tempMax)) : undefined;
       const dayMin = week.length ? Math.min(...week.map((d) => d.tempMin)) : undefined;
+      const fromBackend = !String(curr.source || '').toLowerCase().includes('fallback');
       onLiveWeather?.({
         city: curr.city || city.name,
         temperature: Math.round(cw.temperature_c),
@@ -833,7 +830,9 @@ export default function WeatherPanel({
         condition: cw.condition || conditionFromWeather(cw.temperature_c, cw.rainfall_mm),
         minTemp: dayMin,
         maxTemp: dayMax,
-      });
+        source: curr.source,
+        isBackend: fromBackend,
+      } as LiveWeatherSummary & { source?: string; isBackend?: boolean });
     } catch (e: any) {
       setError(e?.message || 'Failed to fetch weather');
     } finally {

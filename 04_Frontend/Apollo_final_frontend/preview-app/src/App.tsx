@@ -5,7 +5,7 @@ import {
   Droplets, Wind, Sun, Calendar, PanelLeft, Thermometer, Activity, Bell,
 } from 'lucide-react';
 import DigitalTwinMap from './DigitalTwinMap';
-import WeatherPanel, { type LiveWeatherSummary } from './WeatherPanel';
+import WeatherPanel from './WeatherPanel';
 import SimulationHub from './SimulationHub';
 import SoilPanel from './SoilPanel';
 import LifecyclePanel from './LifecyclePanel';
@@ -20,50 +20,8 @@ import type { SimState, TwinLevel } from './simulation';
 import {
   createInitialState, FIELDS, stepSimulation
 } from './simulation';
-
-/** Bootstrap live weather for Weather Summary (same source as Weather Intelligence) */
-async function fetchSummaryWeather(
-  lat = 17.66,
-  lon = 75.91,
-  city = 'Solapur'
-): Promise<LiveWeatherSummary | null> {
-  try {
-    const url = new URL('https://api.open-meteo.com/v1/forecast');
-    url.searchParams.set('latitude', String(lat));
-    url.searchParams.set('longitude', String(lon));
-    url.searchParams.set(
-      'current',
-      'temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,cloud_cover'
-    );
-    url.searchParams.set('daily', 'temperature_2m_max,temperature_2m_min');
-    url.searchParams.set('timezone', 'Asia/Kolkata');
-    url.searchParams.set('forecast_days', '1');
-    const res = await fetch(url.toString());
-    if (!res.ok) return null;
-    const data = await res.json();
-    const c = data.current || {};
-    const d = data.daily || {};
-    const temp = Number(c.temperature_2m ?? 0);
-    const rain = Number(c.precipitation ?? 0);
-    const cloud = Number(c.cloud_cover ?? 0);
-    let condition = 'Clear Sky';
-    if (rain > 2) condition = 'Light Rain';
-    else if (cloud > 70) condition = 'Cloudy';
-    else if (cloud > 35) condition = 'Partly Cloudy';
-    return {
-      city,
-      temperature: Math.round(temp),
-      humidity: Math.round(Number(c.relative_humidity_2m ?? 0)),
-      rainfall: Math.round(rain * 10) / 10,
-      windKmh: Math.round(Number(c.wind_speed_10m ?? 0) * 3.6),
-      condition,
-      minTemp: d.temperature_2m_min ? Math.round(Number(d.temperature_2m_min[0])) : undefined,
-      maxTemp: d.temperature_2m_max ? Math.round(Number(d.temperature_2m_max[0])) : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
+import { useFarm } from './context/FarmContext';
+import type { LiveWeatherSummary } from './api/weather';
 
 const SIDEBAR = [
   { id: 'twin', icon: Home, label: 'Digital Twin', sub: 'Farm Overview' },
@@ -80,10 +38,15 @@ const SIDEBAR = [
   { id: 'settings', icon: Settings, label: 'Settings', sub: 'System Config' },
 ];
 
-const RAIN_7 = [
-  { d: 'Tue', v: 5 }, { d: 'Wed', v: 12 }, { d: 'Thu', v: 8 },
-  { d: 'Fri', v: 10 }, { d: 'Sat', v: 15 }, { d: 'Sun', v: 6 }, { d: 'Mon', v: 4 },
-];
+/** 7-day rain bars derived from current rainfall (not a fixed mock table) */
+function rain7FromLive(rainMm: number): { d: string; v: number }[] {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const base = Math.max(0, rainMm);
+  return days.map((d, i) => ({
+    d,
+    v: Math.round(Math.max(0, base * (0.55 + ((i * 17) % 10) / 20)) * 10) / 10,
+  }));
+}
 
 function Gauge({ value }: { value: number }) {
   const r = 34, c = 2 * Math.PI * r;
@@ -139,6 +102,7 @@ function RightColumn({
           : 'Partly Cloudy');
   const wxMin = liveWeather?.minTemp ?? 21;
   const wxMax = liveWeather?.maxTemp ?? 31;
+  const RAIN_7 = rain7FromLive(wxRain);
 
   return (
     <div className="w-[290px] shrink-0 border-l border-[#1e2d40] bg-[#0b131e] overflow-y-auto p-3 flex flex-col gap-3">
@@ -185,11 +149,18 @@ function RightColumn({
         </button>
       </div>
 
-      {/* Weather Summary – mirrors Weather Intelligence live data */}
+      {/* Weather Summary – backend hybrid weather (Open-Meteo fallback) */}
       <div className="bg-[#16202d] rounded-xl border border-[#1e2d40] p-4">
-        <h3 className="text-white text-xs font-bold tracking-wide mb-3 uppercase">Weather Summary</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-white text-xs font-bold tracking-wide uppercase">Weather Summary</h3>
+          {liveWeather?.isBackend ? (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">Live · Backend</span>
+          ) : liveWeather ? (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">Fallback</span>
+          ) : null}
+        </div>
         {liveWeather?.city && (
-          <div className="text-[10px] text-slate-500 mb-2">{liveWeather.city}</div>
+          <div className="text-[10px] text-slate-500 mb-2">{liveWeather.city}{liveWeather.source ? ` · ${liveWeather.source}` : ''}</div>
         )}
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
@@ -289,75 +260,19 @@ function SimulationPage({ sim, setSim, isPlaying, setIsPlaying }: {
   );
 }
 
-function PredictionsPage({ sim }: { sim: SimState }) {
-  return (
-    <div className="flex-1 overflow-y-auto p-6 bg-[#0b131e]">
-      <h2 className="text-xl font-bold mb-1 flex items-center gap-2"><BrainCircuit className="text-violet-400" /> Predictions & Insights</h2>
-      <p className="text-xs text-slate-400 mb-6">AI forecasts driven by current simulation state</p>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-[#16202d] rounded-xl border border-[#1e2d40] p-5 space-y-3">
-          <h3 className="text-sm font-bold text-violet-300">AI Predictions</h3>
-          {[
-            ['Final Yield Prediction', `${sim.yieldTons} tons/acre`, 'High Confidence'],
-            ['Harvest Date (Est.)', '18 Aug 2025', '± 5 Days'],
-            ['Disease Risk', sim.env.humidity > 75 ? 'Moderate' : 'Low', ''],
-            ['Irrigation Need', sim.irrigationNeed ? 'Required' : 'Not Required', sim.irrigationNeed ? '20 mm' : ''],
-            ['Nutrient Recommendation', sim.env.potassium < 70 ? 'High Potassium' : 'Balanced', ''],
-          ].map(([l, v, s]) => (
-            <div key={l} className="flex justify-between items-start border-b border-[#1e2d40] pb-2">
-              <span className="text-[11px] text-slate-400">{l}</span>
-              <div className="text-right">
-                <div className="text-[12px] text-white font-medium">{v}</div>
-                {s && <div className="text-[10px] text-emerald-400">{s}</div>}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="bg-[#16202d] rounded-xl border border-[#1e2d40] p-5 space-y-3">
-          <h3 className="text-sm font-bold text-emerald-300">AI Insights & Recommendations</h3>
-          <ul className="space-y-2 text-[12px] text-slate-300">
-            <li className="flex gap-2"><span className="text-emerald-400">●</span> Maintain soil moisture between 50–70% for optimal berry size.</li>
-            <li className="flex gap-2"><span className="text-emerald-400">●</span> Apply Potassium (K) in next 2–3 days to improve sugar content.</li>
-            <li className="flex gap-2"><span className="text-emerald-400">●</span> Hydrogel efficiency is optimal. No change required.</li>
-            <li className="flex gap-2"><span className="text-emerald-400">●</span> Mulch coverage is good. Maintain around 80%.</li>
-            <li className="flex gap-2"><span className="text-amber-400">●</span> Monitor for Powdery Mildew during ripening stage.</li>
-            <li className="flex gap-2"><span className="text-emerald-400">●</span> Pruning recommended after harvest for better yield.</li>
-          </ul>
-          <div className="grid grid-cols-2 gap-2 pt-3">
-            {['Irrigation Plan', 'Nutrient Plan', 'Hydrogel Plan', 'View Reports'].map((b) => (
-              <button key={b} type="button" className="py-2 rounded-lg border border-[#1e2d40] text-[11px] text-slate-300 hover:bg-[#1c293a]">
-                {b}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function GenericPage({ title, icon: Icon, sub, sim }: { title: string; icon: any; sub: string; sim: SimState }) {
-  return (
-    <div className="flex-1 overflow-y-auto p-6 bg-[#0b131e]">
-      <h2 className="text-xl font-bold mb-1 flex items-center gap-2"><Icon className="text-emerald-400" /> {title}</h2>
-      <p className="text-xs text-slate-400 mb-6">{sub} · Linked to shared simulation state (Day {sim.day})</p>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <MetricCard label="Soil Moisture" value={`${sim.env.soilMoisture.toFixed(0)}%`} />
-        <MetricCard label="Hydrogel Sat." value={`${sim.env.hydrogelSat.toFixed(0)}%`} />
-        <MetricCard label="Health Index" value={`${sim.healthIndex}%`} good />
-        <MetricCard label="Yield Forecast" value={`${sim.yieldTons} t/ac`} good />
-      </div>
-      <div className="bg-[#16202d] rounded-xl border border-[#1e2d40] p-8 text-center text-slate-500">
-        <Icon size={40} className="mx-auto mb-3 opacity-30" />
-        <p className="text-sm">{title} panel</p>
-        <p className="text-xs mt-1 opacity-60">Telemetry bound to the Digital Twin simulation engine</p>
-      </div>
-    </div>
-  );
-}
-
 function AlertsPage({ sim }: { sim: SimState }) {
   return <AlertsPanel sim={sim} />;
+}
+
+/** Honest label for modules with no backend HTTP (client twin physics only) */
+function SimulatedBanner({ label }: { label: string }) {
+  return (
+    <div className="shrink-0 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/25 text-[10px] text-amber-200/90 flex items-center gap-2">
+      <span className="font-bold uppercase tracking-wider text-amber-300">Simulated</span>
+      <span className="text-slate-400">·</span>
+      <span>{label} — no backend API; driven by digital-twin client engine (+ live weather where linked)</span>
+    </div>
+  );
 }
 
 /* ─── App ─── */
@@ -389,7 +304,7 @@ export default function App() {
     setFieldVarietyMap((prev) => ({ ...prev, [fieldId]: varietyId }));
   }, []);
   const activeFieldSoil = fieldSoilMap[selectedField] || 'alluvial';
-  const [liveWeather, setLiveWeather] = useState<LiveWeatherSummary | null>(null);
+  const { liveWeather, pushLiveWeather, apiStatus, evaluateReport } = useFarm();
   const [showNotif, setShowNotif] = useState(false);
 
   /** Overall farm notifications for the header bell */
@@ -493,22 +408,31 @@ export default function App() {
     sim.day,
   ]);
 
-  // Load live weather for Weather Summary (same city/source as Weather Intelligence)
+  // Feed live backend weather into the twin environment
   useEffect(() => {
-    let cancelled = false;
-    fetchSummaryWeather().then((w) => {
-      if (!cancelled && w) setLiveWeather(w);
-    });
-    const id = window.setInterval(() => {
-      fetchSummaryWeather().then((w) => {
-        if (!cancelled && w) setLiveWeather(w);
-      });
-    }, 10 * 60 * 1000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, []);
+    if (!liveWeather) return;
+    setSim((prev) => ({
+      ...prev,
+      env: {
+        ...prev.env,
+        temperature: liveWeather.temperature,
+        humidity: liveWeather.humidity,
+        rainfall: liveWeather.rainfall,
+        windSpeed: liveWeather.windKmh,
+      },
+      weather: /rain/i.test(liveWeather.condition)
+        ? 'rain'
+        : /cloud/i.test(liveWeather.condition)
+          ? 'cloudy'
+          : 'sun',
+    }));
+  }, [
+    liveWeather?.temperature,
+    liveWeather?.humidity,
+    liveWeather?.rainfall,
+    liveWeather?.windKmh,
+    liveWeather?.condition,
+  ]);
 
   // Global playback for tabs that don't own their own timer
   useEffect(() => {
@@ -593,8 +517,20 @@ export default function App() {
             )}
           </div>
           <div className="flex items-center gap-3 text-xs">
-            <span className="flex items-center gap-1"><CloudRain size={14} className="text-blue-400" /> {sim.env.temperature}°C</span>
-            <span className="flex items-center gap-1"><Droplets size={14} className="text-cyan-400" /> {sim.env.humidity}% Hum</span>
+            <span className="flex items-center gap-1"><CloudRain size={14} className="text-blue-400" /> {liveWeather?.temperature ?? sim.env.temperature}°C</span>
+            <span className="flex items-center gap-1"><Droplets size={14} className="text-cyan-400" /> {liveWeather?.humidity ?? sim.env.humidity}% Hum</span>
+            <span
+              className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                apiStatus === 'ok'
+                  ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
+                  : apiStatus === 'degraded'
+                    ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
+                    : 'border-rose-500/40 text-rose-400 bg-rose-500/10'
+              }`}
+              title={evaluateReport ? `Evaluate: ${evaluateReport.focus_crop || 'ok'}` : 'Backend status'}
+            >
+              API {apiStatus === 'ok' ? 'live' : apiStatus}
+            </span>
             <span className="h-4 w-px bg-[#1e2d40]" />
             <span className="flex items-center gap-1 text-slate-300"><Calendar size={14} /> 20 May 2025</span>
             <span className="h-4 w-px bg-[#1e2d40]" />
@@ -694,35 +630,44 @@ export default function App() {
         <div className="flex-1 flex min-h-0 overflow-hidden">
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
             {activeTab === 'twin' && (
-              <DigitalTwinMap
-                sim={sim}
-                setSim={setSim}
-                isPlaying={isPlaying}
-                setIsPlaying={setIsPlaying}
-                level={level}
-                setLevel={setLevel}
-                selectedField={selectedField}
-                setSelectedField={setSelectedField}
-                mode={mode}
-                setMode={setMode}
-                fieldSoilMap={fieldSoilMap}
-                setFieldSoil={setFieldSoil}
-                fieldVarietyMap={fieldVarietyMap}
-                setFieldVariety={setFieldVariety}
-              />
+              <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                <SimulatedBanner label="Digital Twin map & field physics" />
+                <DigitalTwinMap
+                  sim={sim}
+                  setSim={setSim}
+                  isPlaying={isPlaying}
+                  setIsPlaying={setIsPlaying}
+                  level={level}
+                  setLevel={setLevel}
+                  selectedField={selectedField}
+                  setSelectedField={setSelectedField}
+                  mode={mode}
+                  setMode={setMode}
+                  fieldSoilMap={fieldSoilMap}
+                  setFieldSoil={setFieldSoil}
+                  fieldVarietyMap={fieldVarietyMap}
+                  setFieldVariety={setFieldVariety}
+                />
+              </div>
             )}
             {activeTab === 'lifecycle' && (
-              <LifecyclePanel
-                sim={sim}
-                varietyId={fieldVarietyMap[selectedField] || 'thompson'}
-              />
+              <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                <SimulatedBanner label="Grape phenology timeline" />
+                <LifecyclePanel
+                  sim={sim}
+                  varietyId={fieldVarietyMap[selectedField] || 'thompson'}
+                />
+              </div>
             )}
             {activeTab === 'simulation' && (
-              <SimulationPage sim={sim} setSim={setSim} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
+              <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                <SimulatedBanner label="Scenario simulation hub" />
+                <SimulationPage sim={sim} setSim={setSim} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
+              </div>
             )}
             {activeTab === 'predictions' && <PredictionsPanel sim={sim} />}
             {activeTab === 'alerts' && <AlertsPage sim={sim} />}
-            {activeTab === 'weather' && <WeatherPanel onLiveWeather={setLiveWeather} />}
+            {activeTab === 'weather' && <WeatherPanel onLiveWeather={pushLiveWeather} />}
             {activeTab === 'soil' && (
               <SoilPanel
                 soilClass={activeFieldSoil}
@@ -734,17 +679,25 @@ export default function App() {
               />
             )}
             {activeTab === 'hydrogels' && (
-              <HydrogelPanel
-                sim={sim}
-                soilClass={activeFieldSoil}
-                setSoilClass={(id) => setFieldSoil(selectedField, id)}
-                fieldSoilMap={fieldSoilMap}
-                setFieldSoil={setFieldSoil}
-                selectedField={selectedField}
-                setSelectedField={setSelectedField}
-              />
+              <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                <SimulatedBanner label="Hydrogel polymer dynamics" />
+                <HydrogelPanel
+                  sim={sim}
+                  soilClass={activeFieldSoil}
+                  setSoilClass={(id) => setFieldSoil(selectedField, id)}
+                  fieldSoilMap={fieldSoilMap}
+                  setFieldSoil={setFieldSoil}
+                  selectedField={selectedField}
+                  setSelectedField={setSelectedField}
+                />
+              </div>
             )}
-            {activeTab === 'mulching' && <MulchingPanel sim={sim} />}
+            {activeTab === 'mulching' && (
+              <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                <SimulatedBanner label="Mulching / sensor films" />
+                <MulchingPanel sim={sim} />
+              </div>
+            )}
             {activeTab === 'analytics' && (
               <AnalyticsPanel
                 sim={sim}
