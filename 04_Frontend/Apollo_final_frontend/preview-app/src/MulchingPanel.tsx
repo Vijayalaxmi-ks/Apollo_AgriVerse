@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   Droplets, Leaf, AlertTriangle, Info, Thermometer, Shield,
   Sprout, CheckCircle2, Activity,
 } from 'lucide-react';
-import type { SimState } from './simulation';
+import type { SimState, FieldInfo } from './simulation';
 import { useFarmOptional } from './context/FarmContext';
 import { FIELDS } from './simulation';
 
@@ -17,10 +17,10 @@ type ZoneRow = {
   health: 'Excellent' | 'Good' | 'Fair';
 };
 
-function buildZones(sim: SimState): ZoneRow[] {
+function buildZones(sim: SimState, fields: FieldInfo[] = FIELDS): ZoneRow[] {
   const baseCov = sim.mulchCoverage;
   const baseMoist = sim.env.soilMoisture;
-  return FIELDS.map((f, i) => {
+  return fields.map((f, i) => {
     const off = [2, 4, -1, -5][i] ?? 0;
     const coverage = Math.max(70, Math.min(98, Math.round(baseCov + off + (f.health - 85) * 0.15)));
     const moisture = Math.max(45, Math.min(85, Math.round(baseMoist + off * 0.8 + (f.soilMoisture - 60) * 0.2)));
@@ -234,18 +234,23 @@ function MulchCrossSection({ moisture, coverage }: { moisture: number; coverage:
   );
 }
 
-export default function MulchingPanel({ sim }: { sim: SimState }) {
+export default function MulchingPanel({ sim, fields: fieldsProp }: { sim: SimState; fields?: FieldInfo[] }) {
+  const fields = fieldsProp?.length ? fieldsProp : FIELDS;
   const farmCtx = useFarmOptional();
   const twinMulch = farmCtx?.twinState?.mulch;
   const backendDeg = twinMulch?.mulch_degradation_pct;
   const backendCool = twinMulch?.effective_mulch_cooling_c;
 
-  const [selectedZone, setSelectedZone] = useState(FIELDS[0]?.id || 'A');
-  const zones = useMemo(() => buildZones(sim), [sim]);
+  const [selectedZone, setSelectedZone] = useState(fields[0]?.id || 'A');
+  const zones = useMemo(() => buildZones(sim, fields), [sim, fields]);
+  useEffect(() => {
+    const ids = fields.map((f) => f.id);
+    if (!ids.includes(selectedZone)) setSelectedZone(ids[0] || 'A');
+  }, [fields, selectedZone]);
   const liveDeg = backendDeg != null ? Number(backendDeg) : null;
   const liveCool = backendCool != null ? Number(backendCool) : null;
   const active = zones.find((z) => z.id === selectedZone) || zones[0];
-  const fieldMeta = FIELDS.find((f) => f.id === selectedZone) || FIELDS[0];
+  const fieldMeta = fields.find((f) => f.id === selectedZone) || fields[0];
 
   const avgCoverage = Math.round(zones.reduce((s, z) => s + z.coverage, 0) / zones.length);
   const avgMoisture = Math.round(zones.reduce((s, z) => s + z.moisture, 0) / zones.length);

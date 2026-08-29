@@ -24,6 +24,7 @@ import {
 import { useFarm } from './context/FarmContext';
 import { useSettings } from './context/SettingsContext';
 import type { LiveWeatherSummary } from './api/weather';
+import { fetchActiveFarmProfile, type FarmFieldPayload } from './api/farm';
 
 const SIDEBAR = [
   { id: 'settings', icon: Settings, label: 'Settings', sub: 'System Config' },
@@ -247,8 +248,8 @@ function RightColumn({
         </div>
         <div className="space-y-3">
           {(sim.alerts.length ? sim.alerts : [
-            { id: '1', severity: 'high' as const, title: 'High temperature expected', field: 'Field B', age: '10 min ago' },
-            { id: '2', severity: 'medium' as const, title: 'Low nitrogen in Zone B2', field: 'Field B', age: '35 min ago' },
+            { id: '1', severity: 'high' as const, title: 'High temperature expected', field: fieldsList[0]?.name || 'Field A', age: '10 min ago' },
+            { id: '2', severity: 'medium' as const, title: 'Low nitrogen in Zone B2', field: fieldsList[Math.min(1, fieldsList.length - 1)]?.name || 'Field A', age: '35 min ago' },
             { id: '3', severity: 'low' as const, title: 'Rainfall expected in 18 hrs', field: 'Farm', age: '1 hr ago' },
           ]).slice(0, 3).map((a) => (
             <div key={a.id} className="flex gap-2">
@@ -285,8 +286,8 @@ function SimulationPage({ sim, setSim, isPlaying, setIsPlaying }: {
   );
 }
 
-function AlertsPage({ sim }: { sim: SimState }) {
-  return <AlertsPanel sim={sim} />;
+function AlertsPage({ sim, fields }: { sim: SimState; fields?: FieldInfo[] }) {
+  return <AlertsPanel sim={sim} fields={fields} />;
 }
 
 /** Label for digital-twin / scenario modules driven by the client simulation engine */
@@ -306,7 +307,8 @@ export default function App() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [showRight, setShowRight] = useState(true);
   const [sim, setSim] = useState<SimState>(() => createInitialState(0));
-  const { settings } = useSettings();
+  const { settings, setSettings } = useSettings();
+  const farmApi = useFarm();
   const [isPlaying, setIsPlaying] = useState(() => {
     try {
       const raw = localStorage.getItem('agriverse-settings-v2') || localStorage.getItem('agriverse-settings-v1');
@@ -315,10 +317,11 @@ export default function App() {
     return false;
   });
   const [level, setLevel] = useState<TwinLevel>('farm');
-  const [selectedField, setSelectedField] = useState('B');
+  const [selectedField, setSelectedField] = useState('A');
   const [mode, setMode] = useState<'auto' | 'manual'>('auto');
   const FIELD_SOIL_KEY = 'agriverse-field-soil-v1';
   const FIELD_VAR_KEY = 'agriverse-field-variety-v1';
+  const FIELD_BACKEND_KEY = 'agriverse-backend-fields-v1';
   const [fieldSoilMap, setFieldSoilMap] = useState<Record<string, import('./simulation').SoilClassId>>(() => {
     try {
       const raw = localStorage.getItem(FIELD_SOIL_KEY);
@@ -348,6 +351,111 @@ export default function App() {
     });
   }, []);
 
+  /** Backend-persisted field rows (acres, names, soil, variety) — overlays synthetic layout */
+  const [backendFields, setBackendFields] = useState<FarmFieldPayload[]>(() => {
+    try {
+      const raw = localStorage.getItem(FIELD_BACKEND_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return [];
+  });
+
+  // Hydrate Settings + field maps from backend active profile (source of truth)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const profile = await fetchActiveFarmProfile();
+        if (cancelled || !profile) return;
+
+        const nFields =
+          profile.field_count ||
+          (Array.isArray(profile.fields) ? profile.fields.length : 0) ||
+          undefined;
+
+        // Settings identity + field count
+        const patch: Partial<typeof settings> = {};
+        if (profile.farm_name) patch.farmName = String(profile.farm_name);
+        if (profile.operator) patch.operator = String(profile.operator);
+        if (profile.region) patch.region = String(profile.region);
+        if (profile.district) patch.district = String(profile.district);
+        if (profile.city) patch.city = String(profile.city);
+        if (profile.farm_id) patch.farmId = String(profile.farm_id);
+        if (profile.region_id) patch.regionId = String(profile.region_id);
+        if (profile.soil_id) patch.soilId = String(profile.soil_id);
+        if (profile.water_availability) patch.waterAvailability = String(profile.water_availability);
+        if (profile.primary_crop) patch.primaryCrop = String(profile.primary_crop);
+        if (profile.default_soil_class) patch.defaultSoilClass = String(profile.default_soil_class);
+        if (nFields && nFields >= 1 && nFields <= 8) patch.fieldCount = nFields;
+        if (profile.latitude != null && Number.isFinite(Number(profile.latitude))) {
+          patch.latitude = Number(profile.latitude);
+        }
+        if (profile.longitude != null && Number.isFinite(Number(profile.longitude))) {
+          patch.longitude = Number(profile.longitude);
+        }
+        if (Object.keys(patch).length) setSettings(patch);
+
+        // FarmContext identity for weather / evaluate / twin
+        if (profile.farm_id) {
+          farmApi.saveFarm({
+            ...farmApi.farm,
+            farm_id: String(profile.farm_id),
+            region_id: String(profile.region_id || farmApi.farm.region_id),
+            soil_id: String(profile.soil_id || farmApi.farm.soil_id),
+            water_availability: String(profile.water_availability || farmApi.farm.water_availability),
+            latitude: Number(profile.latitude) || farmApi.farm.latitude,
+            longitude: Number(profile.longitude) || farmApi.farm.longitude,
+            city: String(profile.city || farmApi.farm.city),
+            farmName: String(profile.farm_name || farmApi.farm.farmName || ''),
+          });
+        }
+
+        // Per-field soil / variety / acres from backend
+        if (Array.isArray(profile.fields) && profile.fields.length) {
+          setBackendFields(profile.fields);
+          try {
+            localStorage.setItem(FIELD_BACKEND_KEY, JSON.stringify(profile.fields));
+          } catch { /* ignore */ }
+
+          const soils: Record<string, SoilClassId> = {};
+          const vars: Record<string, GrapeVarietyId> = {};
+          profile.fields.forEach((f) => {
+            if (!f?.field_id) return;
+            if (f.soil_class) soils[f.field_id] = f.soil_class as SoilClassId;
+            if (f.grape_variety) vars[f.field_id] = f.grape_variety as GrapeVarietyId;
+          });
+          if (Object.keys(soils).length) {
+            setFieldSoilMap((prev) => ({ ...prev, ...soils }));
+          }
+          if (Object.keys(vars).length) {
+            setFieldVarietyMap((prev) => ({ ...prev, ...vars }));
+          }
+          setSelectedField((prev) => {
+            const ids = profile.fields!.map((f) => f.field_id).filter(Boolean);
+            return ids.includes(prev) ? prev : ids[0] || 'A';
+          });
+        }
+
+        // Measures → localStorage for Lifecycle / Settings
+        if (profile.measures && typeof profile.measures === 'object') {
+          try {
+            localStorage.setItem(
+              'agriverse-lifecycle-measures-v1',
+              JSON.stringify(profile.measures),
+            );
+            window.dispatchEvent(new CustomEvent('agriverse-field-measures-saved'));
+          } catch { /* ignore */ }
+        }
+      } catch {
+        /* backend offline — keep local settings */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Persist maps when rebuilt from field-count changes
   useEffect(() => {
     try {
@@ -356,14 +464,84 @@ export default function App() {
     } catch { /* ignore */ }
   }, [fieldSoilMap, fieldVarietyMap]);
 
-  // Dynamic field parcels from farmer field-count + default soil
+  // Dynamic field parcels from farmer field-count + default soil + backend acres/names
   const dynamicFields: FieldInfo[] = useMemo(() => {
-    const n = settings.fieldCount || 4;
+    const n =
+      settings.fieldCount ||
+      (backendFields.length ? backendFields.length : 0) ||
+      4;
     const soil = getSoilClass(settings.defaultSoilClass || 'alluvial');
     const crop = getCropCatalogEntry(settings.primaryCrop || 'grape');
     const varietyLabel = crop.twinGrapeVisual ? 'Thompson Seedless' : crop.label;
-    return buildDynamicFields(n, { soilLabel: soil.shortLabel, varietyLabel });
-  }, [settings.fieldCount, settings.defaultSoilClass, settings.primaryCrop]);
+    const base = buildDynamicFields(n, { soilLabel: soil.shortLabel, varietyLabel });
+    if (!backendFields.length) return base;
+    const byId = Object.fromEntries(
+      backendFields.filter((f) => f?.field_id).map((f) => [f.field_id, f]),
+    );
+    return base.map((f) => {
+      const b = byId[f.id];
+      if (!b) return f;
+      const acres =
+        b.acres != null && Number.isFinite(Number(b.acres))
+          ? Number(b.acres)
+          : b.area_ha != null && Number.isFinite(Number(b.area_ha))
+            ? Math.round(Number(b.area_ha) * 2.47105 * 100) / 100
+            : f.acres;
+      const soilId = (b.soil_class as SoilClassId) || fieldSoilMap[f.id] || settings.defaultSoilClass;
+      const soilInfo = getSoilClass(soilId as SoilClassId);
+      const plants =
+        b.density_per_ha && Number(b.density_per_ha)
+          ? Math.round(Number(b.density_per_ha) * (acres * 0.404686))
+          : Math.round(acres * 480);
+      return {
+        ...f,
+        name: b.name || f.name,
+        acres,
+        plants,
+        soilType: soilInfo.shortLabel || f.soilType,
+        variety: b.grape_variety
+          ? getGrapeVariety(b.grape_variety as GrapeVarietyId).label
+          : f.variety,
+        yieldEst:
+          b.yield_t_per_ha && Number(b.yield_t_per_ha)
+            ? Math.round((Number(b.yield_t_per_ha) / 2.47105) * 10) / 10
+            : f.yieldEst,
+      };
+    });
+  }, [
+    settings.fieldCount,
+    settings.defaultSoilClass,
+    settings.primaryCrop,
+    backendFields,
+    fieldSoilMap,
+  ]);
+
+  // After Settings save, adopt field payload so panels match backend immediately
+  useEffect(() => {
+    const onSaved = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as {
+        fieldCount?: number;
+        fields?: FarmFieldPayload[];
+      } | undefined;
+      if (detail?.fields && Array.isArray(detail.fields)) {
+        setBackendFields(detail.fields);
+        try {
+          localStorage.setItem(FIELD_BACKEND_KEY, JSON.stringify(detail.fields));
+        } catch { /* ignore */ }
+        const soils: Record<string, SoilClassId> = {};
+        const vars: Record<string, GrapeVarietyId> = {};
+        detail.fields.forEach((f) => {
+          if (!f?.field_id) return;
+          if (f.soil_class) soils[f.field_id] = f.soil_class as SoilClassId;
+          if (f.grape_variety) vars[f.field_id] = f.grape_variety as GrapeVarietyId;
+        });
+        if (Object.keys(soils).length) setFieldSoilMap((prev) => ({ ...prev, ...soils }));
+        if (Object.keys(vars).length) setFieldVarietyMap((prev) => ({ ...prev, ...vars }));
+      }
+    };
+    window.addEventListener('agriverse-settings-saved', onSaved as EventListener);
+    return () => window.removeEventListener('agriverse-settings-saved', onSaved as EventListener);
+  }, []);
 
   // Keep soil/variety maps aligned with field count
   useEffect(() => {
@@ -797,6 +975,7 @@ export default function App() {
                   fieldName={dynamicFields.find((f) => f.id === selectedField)?.name}
                   primaryCropId={settings.primaryCrop || 'grape'}
                   primaryCropLabel={primaryCrop.label}
+                  fields={dynamicFields}
                 />
               </div>
             )}
@@ -813,9 +992,10 @@ export default function App() {
                 selectedField={selectedField}
                 primaryCropId={settings.primaryCrop || 'grape'}
                 primaryCropLabel={primaryCrop.label}
+                fields={dynamicFields}
               />
             )}
-            {activeTab === 'alerts' && <AlertsPage sim={sim} />}
+            {activeTab === 'alerts' && <AlertsPage sim={sim} fields={dynamicFields} />}
             {activeTab === 'weather' && (
               <WeatherPanel
                 onLiveWeather={pushLiveWeather}
@@ -840,6 +1020,7 @@ export default function App() {
                 setFieldSoil={setFieldSoil}
                 selectedField={selectedField}
                 setSelectedField={setSelectedField}
+                fields={dynamicFields}
               />
             )}
             {activeTab === 'hydrogels' && (
@@ -853,13 +1034,14 @@ export default function App() {
                   setFieldSoil={setFieldSoil}
                   selectedField={selectedField}
                   setSelectedField={setSelectedField}
+                  fields={dynamicFields}
                 />
               </div>
             )}
             {activeTab === 'mulching' && (
               <div className="flex-1 flex flex-col min-h-0 min-w-0">
                 <SimulatedBanner label="Mulching / sensor films" />
-                <MulchingPanel sim={sim} />
+                <MulchingPanel sim={sim} fields={dynamicFields} />
               </div>
             )}
             {activeTab === 'analytics' && (
@@ -867,9 +1049,10 @@ export default function App() {
                 sim={sim}
                 fieldVarietyMap={fieldVarietyMap}
                 fieldSoilMap={fieldSoilMap}
+                fields={dynamicFields}
               />
             )}
-            {activeTab === 'reports' && <ReportsPanel sim={sim} />}
+            {activeTab === 'reports' && <ReportsPanel sim={sim} fields={dynamicFields} />}
             {activeTab === 'settings' && (
               <SettingsPanel
                 sim={sim}

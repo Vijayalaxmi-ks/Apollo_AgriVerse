@@ -115,18 +115,23 @@ export default function SettingsPanel({
     if (fid) {
       const fieldPayload = (fields.length ? fields : []).map((f) => {
         const m = fieldMeasures[f.id] || emptyMeasure();
+        const areaHaNum = m.areaHa ? Number(m.areaHa) : undefined;
+        const acresFromHa =
+          areaHaNum != null && Number.isFinite(areaHaNum)
+            ? Math.round(areaHaNum * 2.47105 * 100) / 100
+            : f.acres;
         return {
           field_id: f.id,
           name: f.name,
-          acres: f.acres,
+          acres: acresFromHa,
           soil_class: fieldSoilMap?.[f.id] || cfg.defaultSoilClass,
           crop_id: fieldCropMap[f.id] || cfg.primaryCrop,
           grape_variety: fieldVarietyMap?.[f.id] || 'thompson',
-          area_ha: m.areaHa,
-          yield_t_per_ha: m.yieldTPerHa,
-          density_per_ha: m.densityPerHa,
-          irrigation_mm: m.irrigationMm,
-          notes: m.notes,
+          area_ha: m.areaHa || undefined,
+          yield_t_per_ha: m.yieldTPerHa || undefined,
+          density_per_ha: m.densityPerHa || undefined,
+          irrigation_mm: m.irrigationMm || undefined,
+          notes: m.notes || undefined,
         };
       });
       void saveFarmProfile({
@@ -141,6 +146,13 @@ export default function SettingsPanel({
         fields: fieldPayload,
         measures: fieldMeasures,
       }).catch(() => { /* offline ok */ });
+      try {
+        window.dispatchEvent(
+          new CustomEvent('agriverse-settings-saved', {
+            detail: { fieldCount: cfg.fieldCount, fields: fieldPayload },
+          }),
+        );
+      } catch { /* ignore */ }
     }
   };
 
@@ -217,21 +229,24 @@ export default function SettingsPanel({
       farmCtx.saveFarm({ ...farmCtx.farm, ...next });
     }
 
-    // Build per-field payload for backend
+    // Build per-field payload for backend (must match FieldMeasure + FarmFieldPayload)
     const fieldPayload = (fields.length ? fields : []).map((f) => {
       const m = fieldMeasures[f.id] || emptyMeasure();
+      const areaHaNum = m.areaHa ? Number(m.areaHa) : undefined;
+      const acresFromHa =
+        areaHaNum != null && Number.isFinite(areaHaNum) ? Math.round(areaHaNum * 2.47105 * 100) / 100 : f.acres;
       return {
         field_id: f.id,
         name: f.name,
-        acres: f.acres,
+        acres: acresFromHa,
         soil_class: fieldSoilMap?.[f.id] || cfg.defaultSoilClass,
         crop_id: fieldCropMap[f.id] || cfg.primaryCrop,
         grape_variety: fieldVarietyMap?.[f.id] || 'thompson',
-        canopy_cm: m.canopyCm,
-        shoot_count: m.shootCount,
-        cluster_count: m.clusterCount,
-        brix: m.brix,
-        notes: m.notes,
+        area_ha: m.areaHa || undefined,
+        yield_t_per_ha: m.yieldTPerHa || undefined,
+        density_per_ha: m.densityPerHa || undefined,
+        irrigation_mm: m.irrigationMm || undefined,
+        notes: m.notes || undefined,
       };
     });
 
@@ -1105,7 +1120,7 @@ export default function SettingsPanel({
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
-                    { icon: Leaf, color: 'text-emerald-300', bg: 'from-emerald-500/15', border: 'border-emerald-500/25', l: 'Blocks', v: '4 fields A–D', s: 'Digital twin parcels' },
+                    { icon: Leaf, color: 'text-emerald-300', bg: 'from-emerald-500/15', border: 'border-emerald-500/25', l: 'Blocks', v: `${cfg.fieldCount} field${cfg.fieldCount === 1 ? '' : 's'}`, s: 'Digital twin parcels' },
                     { icon: Droplets, color: 'text-cyan-300', bg: 'from-cyan-500/15', border: 'border-cyan-500/25', l: 'Water system', v: 'Drip + hydrogel', s: 'Smart irrigation stack' },
                     { icon: Globe, color: 'text-sky-300', bg: 'from-sky-500/15', border: 'border-sky-500/25', l: 'Market zone', v: 'Agmarknet + export', s: 'Price & arbitrage' },
                   ].map((c) => (

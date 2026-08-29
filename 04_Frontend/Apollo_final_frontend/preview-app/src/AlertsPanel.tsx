@@ -5,7 +5,7 @@ import {
   MapPin, Clock, Filter, X, Zap, Activity, Eye, ChevronRight,
   Sun, Cloud, Layers, Radio,
 } from 'lucide-react';
-import type { SimState } from './simulation';
+import type { SimState, FieldInfo } from './simulation';
 import { FIELDS } from './simulation';
 import { useFarmOptional } from './context/FarmContext';
 import { useSettingsOptional } from './context/SettingsContext';
@@ -111,6 +111,7 @@ function buildRichAlerts(
     evaluateReport?: EvaluateReport | null;
     twinState?: any;
     mlTelemetry?: any;
+    fields?: FieldInfo[];
     thresholds?: Pick<
       AppSettings,
       'heatAlertC' | 'humidityAlert' | 'moistureMin' | 'moistureMax' | 'diseaseThreshold' | 'notifyCritical' | 'notifyWeather' | 'notifyIrrigation'
@@ -123,6 +124,7 @@ function buildRichAlerts(
   const report = opts?.evaluateReport;
   const twin = opts?.twinState;
   const mlTel = opts?.mlTelemetry;
+  const fields = opts?.fields?.length ? opts.fields : FIELDS;
   const th = opts?.thresholds;
   const heatT = th?.heatAlertC ?? 34;
   const humT = th?.humidityAlert ?? 80;
@@ -487,13 +489,13 @@ function buildRichAlerts(
       category: 'soil',
       age: '45 min ago',
       metric: `${(sim.stressNutrient * 100).toFixed(0)}%`,
-      action: 'Pull leaf tissue sample from Field B',
+      action: `Pull leaf tissue sample from ${fields[0]?.name || 'Field A'}`,
       source: 'Twin engine',
     });
   }
 
-  // ── Per-field alerts (always several each) ──
-  FIELDS.forEach((f, i) => {
+  // ── Per-field alerts (always several each) — uses profile field count ──
+  fields.forEach((f, i) => {
     const ages = [`${8 + i * 3} min ago`, `${18 + i * 4} min ago`, `${30 + i * 5} min ago`, `${42 + i * 2} min ago`];
 
     if (f.soilMoisture < 50) {
@@ -728,7 +730,7 @@ function buildRichAlerts(
   return items.sort((a, b) => order[a.severity] - order[b.severity] || a.field.localeCompare(b.field));
 }
 
-export default function AlertsPanel({ sim }: { sim: SimState }) {
+export default function AlertsPanel({ sim, fields: fieldsProp }: { sim: SimState; fields?: FieldInfo[] }) {
   const [filterSev, setFilterSev] = useState<'all' | Severity>('all');
   const [filterField, setFilterField] = useState<string>('all');
   const [filterCat, setFilterCat] = useState<'all' | AlertItem['category']>('all');
@@ -736,6 +738,7 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [acked, setAcked] = useState<Set<string>>(new Set());
 
+  const fields = fieldsProp?.length ? fieldsProp : FIELDS;
   const farmCtx = useFarmOptional();
   const settingsCtx = useSettingsOptional();
   const thresholds = settingsCtx?.settings;
@@ -746,6 +749,7 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
         evaluateReport: farmCtx?.evaluateReport,
         twinState: farmCtx?.twinState,
         mlTelemetry: farmCtx?.ml?.telemetry,
+        fields,
         thresholds: thresholds
           ? {
               heatAlertC: thresholds.heatAlertC,
@@ -785,6 +789,7 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
       thresholds?.moistureMin,
       thresholds?.moistureMax,
       thresholds?.diseaseThreshold,
+      fields,
     ],
   );
 
@@ -944,7 +949,7 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
             >
               Farm-wide
             </button>
-            {FIELDS.map((f) => (
+            {fields.map((f) => (
               <button
                 key={f.id}
                 type="button"
@@ -1152,7 +1157,7 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
             <Layers size={13} className="text-violet-400" /> Field risk snapshot
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-            {FIELDS.map((f) => {
+            {fields.map((f) => {
               const related = allAlerts.filter((a) => a.fieldId === f.id && !dismissed.has(a.id));
               const worst =
                 related.find((a) => a.severity === 'critical' || a.severity === 'high' || a.severity === 'medium')

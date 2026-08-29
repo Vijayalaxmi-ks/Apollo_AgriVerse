@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { SimState, EnvParams } from './simulation';
 import { stepSimulation, DEFAULT_ENV, STAGE_RANGES } from './simulation';
+import { useSettingsOptional } from './context/SettingsContext';
 
 type SimNav =
   | 'control'
@@ -554,6 +555,12 @@ export default function SimulationHub({
   isPlaying: boolean;
   setIsPlaying: (v: boolean) => void;
 }) {
+  const settingsCtx = useSettingsOptional();
+  const fieldCount = Math.max(1, Math.min(8, settingsCtx?.settings?.fieldCount || 4));
+  const fieldApplyOptions = [
+    'All Fields',
+    ...Array.from({ length: fieldCount }, (_, i) => `Field ${'ABCDEFGH'[i]}`),
+  ];
   const [nav, setNav] = useState<SimNav>('control');
   const [scenarioName, setScenarioName] = useState('Custom Scenario');
   const [localEnv, setLocalEnv] = useState<EnvParams>({ ...sim.env });
@@ -1104,7 +1111,7 @@ export default function SimulationHub({
                 <SliderRow label="Phosphorus (P₂O₅)" icon={<span className="text-blue-400 text-[10px] font-bold">P</span>} min={0} max={200} step={1} value={localEnv.phosphorus} unit=" kg/ha" onChange={(v) => updateLocal('phosphorus', v)} />
                 <SliderRow label="Potassium (K₂O)" icon={<span className="text-amber-400 text-[10px] font-bold">K</span>} min={0} max={200} step={1} value={localEnv.potassium} unit=" kg/ha" onChange={(v) => updateLocal('potassium', v)} />
                 <div className="flex flex-wrap gap-2 pt-2">
-                  {['All Fields', 'Field A', 'Field B', 'Field C'].map((f) => (
+                  {fieldApplyOptions.map((f) => (
                     <button
                       key={f}
                       type="button"

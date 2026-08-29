@@ -453,6 +453,7 @@ export default function HydrogelPanel({
   setFieldSoil,
   selectedField,
   setSelectedField,
+  fields: fieldsProp,
 }: {
   sim: SimState;
   soilClass?: SoilClassId;
@@ -461,8 +462,10 @@ export default function HydrogelPanel({
   setFieldSoil?: (fieldId: string, soilId: SoilClassId) => void;
   selectedField?: string;
   setSelectedField?: (id: string) => void;
+  fields?: FieldInfo[];
 }) {
-  const [selectedZone, setSelectedZone] = useState(selectedField || FIELDS[0]?.id || 'A');
+  const fields = fieldsProp?.length ? fieldsProp : FIELDS;
+  const [selectedZone, setSelectedZone] = useState(selectedField || fields[0]?.id || 'A');
   const [formula, setFormula] = useState<Formula>({ ...DEFAULT_FORMULA });
   const [appliedPreset, setAppliedPreset] = useState('balanced');
   const [formulaOpen, setFormulaOpen] = useState(true);
@@ -472,9 +475,18 @@ export default function HydrogelPanel({
   const [savedFlash, setSavedFlash] = useState(false);
   const [localSoil, setLocalSoil] = useState<SoilClassId>(soilClass);
 
-  const zones = useMemo(() => buildZones(sim), [sim]);
+  const zones = useMemo(() => buildZones(sim, fields), [sim, fields]);
+  // Keep zone selection aligned with Settings field count / selected field
+  useEffect(() => {
+    const ids = fields.map((f) => f.id);
+    if (selectedField && ids.includes(selectedField)) {
+      setSelectedZone(selectedField);
+    } else if (!ids.includes(selectedZone)) {
+      setSelectedZone(ids[0] || 'A');
+    }
+  }, [fields, selectedField, selectedZone]);
   const active = zones.find((z) => z.id === selectedZone) || zones[0];
-  const fieldMeta = FIELDS.find((f) => f.id === selectedZone) || FIELDS[0];
+  const fieldMeta = fields.find((f) => f.id === selectedZone) || fields[0];
 
   // Soil type follows the selected zone/field map when available
   const activeSoilId =

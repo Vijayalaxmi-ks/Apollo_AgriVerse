@@ -4,7 +4,7 @@ import {
   PieChart, BarChart2, Leaf, Cloud, Sun, Wind, Thermometer,
   Droplets, Zap, FileText, Activity, AlertTriangle,
 } from 'lucide-react';
-import type { SimState, SoilClassId, GrapeVarietyId } from './simulation';
+import type { SimState, SoilClassId, GrapeVarietyId, FieldInfo } from './simulation';
 import { FIELDS, getGrapeVariety, getSoilClass } from './simulation';
 import {
   getCities, getAllCropsFlat, SEASONS, getAllStates,
@@ -173,10 +173,12 @@ function SafeAnalyticsPanel({
   sim,
   fieldVarietyMap,
   fieldSoilMap,
+  fields,
 }: {
   sim: SimState;
   fieldVarietyMap?: Record<string, GrapeVarietyId>;
   fieldSoilMap?: Record<string, SoilClassId>;
+  fields?: FieldInfo[];
 }) {
   try {
     return (
@@ -184,6 +186,7 @@ function SafeAnalyticsPanel({
         sim={sim}
         fieldVarietyMap={fieldVarietyMap}
         fieldSoilMap={fieldSoilMap}
+        fields={fields}
       />
     );
   } catch (err) {
@@ -204,11 +207,14 @@ function AnalyticsPanelInner({
   sim,
   fieldVarietyMap = {},
   fieldSoilMap = {},
+  fields: fieldsProp,
 }: {
   sim: SimState;
   fieldVarietyMap?: Record<string, GrapeVarietyId>;
   fieldSoilMap?: Record<string, SoilClassId>;
+  fields?: FieldInfo[];
 }) {
+  const fields = fieldsProp?.length ? fieldsProp : FIELDS;
 
   const states = getAllStates();
   const [state, setState] = useState('Maharashtra');
@@ -247,7 +253,7 @@ function AnalyticsPanelInner({
     return [...thompson, ...otherGrapes, ...others];
   }, []);
 
-  const farmAcres = FIELDS.reduce((s, f) => s + f.acres, 0);
+  const farmAcres = fields.reduce((s, f) => s + f.acres, 0);
 
   // Auto-advance season panel when simulation reaches harvest stage
   useEffect(() => {
@@ -273,7 +279,7 @@ function AnalyticsPanelInner({
   // Per-field season analytics — driven by SELECTED CROP + weather + soil (+ grape variety when crop is grape)
   const fieldAnalytics = useMemo(() => {
     const isGrapeCrop = /grape/i.test(crop);
-    return FIELDS.map((f) => {
+    return fields.map((f) => {
       const healthIndex = Math.round(f.health * 0.55 + sim.healthIndex * 0.45);
       const varietyId = fieldVarietyMap[f.id] || 'thompson';
       const soilClass = fieldSoilMap[f.id] || 'alluvial';
@@ -387,9 +393,10 @@ function AnalyticsPanelInner({
     sim.mulchCoverage,
     fieldVarietyMap,
     fieldSoilMap,
+    fields,
   ]);
 
-  // Farm totals across all 4 fields
+  // Farm totals across all profile fields
   const farmTotals = useMemo(() => {
     const totalYield = +fieldAnalytics.reduce((s, f) => s + f.totalYield, 0).toFixed(2);
     const revenue = fieldAnalytics.reduce((s, f) => s + f.revenue, 0);
@@ -612,7 +619,7 @@ function AnalyticsPanelInner({
   const cardLabel = 'text-[12px] font-semibold text-slate-300 uppercase tracking-wide';
 
   const reportScopeLabel =
-    selectedFieldId === 'all' ? 'All 4 Fields (Farm)' : `Field ${selectedFieldId}`;
+    selectedFieldId === 'all' ? `All ${fields.length} Fields (Farm)` : `Field ${selectedFieldId}`;
 
   function buildReportText(): string {
     const lines: string[] = [];
@@ -804,7 +811,7 @@ function AnalyticsPanelInner({
                 : 'border-[#1e2d40] text-slate-300 hover:border-slate-500'
             }`}
           >
-            All 4 Fields · {farmTotals.acres.toFixed(2)} ac · {formatInr(farmTotals.revenue)}
+            All {fields.length} Fields · {farmTotals.acres.toFixed(2)} ac · {formatInr(farmTotals.revenue)}
           </button>
           {fieldAnalytics.map((f) => (
             <button
@@ -838,7 +845,7 @@ function AnalyticsPanelInner({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
           {[
-            { icon: <Leaf size={18} className="text-violet-400" />, t: 'TOTAL YIELD', v: `${totalYield} tons`, s: `${yieldPerHa} t/ha · ${selectedFieldId === 'all' ? '4 fields' : `Field ${selectedFieldId}`}`, sc: 'text-violet-300' },
+            { icon: <Leaf size={18} className="text-violet-400" />, t: 'TOTAL YIELD', v: `${totalYield} tons`, s: `${yieldPerHa} t/ha · ${selectedFieldId === 'all' ? `${fields.length} fields` : `Field ${selectedFieldId}`}`, sc: 'text-violet-300' },
             { icon: <DollarSign size={18} className="text-emerald-400" />, t: 'MONEY EARNED', v: formatInr(revenue), s: `${formatInr(revenuePerHa)}/ha · ${vsRevenue >= 0 ? '↑' : '↓'} ${Math.abs(vsRevenue)}%`, sc: vsRevenue >= 0 ? 'text-emerald-400' : 'text-rose-400' },
             { icon: <TrendingUp size={18} className="text-amber-400" />, t: 'ESTIMATED PROFIT', v: formatInr(profit), s: `${formatInr(profitPerHa)}/ha · ${vsProfit >= 0 ? '↑' : '↓'} ${Math.abs(vsProfit)}%`, sc: vsProfit >= 0 ? 'text-emerald-400' : 'text-rose-400' },
             { icon: <PieChart size={18} className="text-sky-400" />, t: 'PRODUCTION COST', v: formatInr(productionCost), s: `${formatInr(costPerHa)}/ha · ${vsCost >= 0 ? '↑' : '↓'} ${Math.abs(vsCost)}%`, sc: vsCost <= 0 ? 'text-emerald-400' : 'text-amber-400' },
@@ -859,7 +866,7 @@ function AnalyticsPanelInner({
             <div>
               <div className={sectionTitle}>This year forecast</div>
               <p className={sectionSub}>
-                {selectedFieldId === 'all' ? 'Sum of 4 fields' : `Field ${selectedFieldId} only`}
+                {selectedFieldId === 'all' ? `Sum of ${fields.length} fields` : `Field ${selectedFieldId} only`}
                 {' · '}seasonal models + live farm health
                 {profile?.harvestMonths ? ` · ${profile.harvestMonths} harvest` : ''}
               </p>

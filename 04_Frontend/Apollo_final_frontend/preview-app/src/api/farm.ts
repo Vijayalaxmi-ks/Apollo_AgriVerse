@@ -10,7 +10,13 @@ export type BackendFarmDefault = {
   latitude: number;
   longitude: number;
   city?: string;
+  farm_name?: string;
+  primary_crop?: string;
+  default_soil_class?: string;
+  field_count?: number;
   farm_area_ha?: number;
+  fields?: FarmFieldPayload[];
+  measures?: Record<string, unknown>;
   [key: string]: unknown;
 };
 
@@ -21,10 +27,10 @@ export type FarmFieldPayload = {
   soil_class?: string;
   crop_id?: string;
   grape_variety?: string;
-  canopy_cm?: string;
-  shoot_count?: string;
-  cluster_count?: string;
-  brix?: string;
+  area_ha?: string;
+  yield_t_per_ha?: string;
+  density_per_ha?: string;
+  irrigation_mm?: string;
   notes?: string;
 };
 
@@ -46,12 +52,26 @@ export type FarmProfileSavePayload = {
   fields?: FarmFieldPayload[];
   measures?: Record<string, unknown>;
   profile_label?: string;
+  saved_at?: string;
 };
 
 export async function fetchFarmDefault(): Promise<BackendFarmDefault> {
   const res = await apiGet<{ success?: boolean; data: BackendFarmDefault }>('/api/farm/default');
   if (res?.data) return res.data;
   return res as unknown as BackendFarmDefault;
+}
+
+/** Full active profile (fields + measures + field_count) from backend */
+export async function fetchActiveFarmProfile(): Promise<FarmProfileSavePayload | null> {
+  try {
+    const res = await apiGet<{ success?: boolean; data: FarmProfileSavePayload | null }>(
+      '/api/farm/active',
+    );
+    if (res?.data) return res.data;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export async function saveFarmProfile(

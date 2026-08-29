@@ -5,7 +5,7 @@ import {
   Thermometer, Droplets, Wind, Sun, TrendingUp, DollarSign,
   MapPin, Calendar, Sparkles, Shield, Gauge, Sprout, Server, RefreshCw,
 } from 'lucide-react';
-import type { SimState } from './simulation';
+import type { SimState, FieldInfo } from './simulation';
 import { FIELDS, STAGE_RANGES } from './simulation';
 import {
   generateSeasonAnalytics,
@@ -28,12 +28,13 @@ function scoreLabel(s: number): { text: string; color: string } {
   return { text: 'Attention', color: 'text-rose-300' };
 }
 
-export default function ReportsPanel({ sim }: { sim: SimState }) {
+export default function ReportsPanel({ sim, fields: fieldsProp }: { sim: SimState; fields?: FieldInfo[] }) {
+  const fields = fieldsProp?.length ? fieldsProp : FIELDS;
   const [season] = useState(SEASONS[1] || 'Rabi 2024-25');
   const farmCtx = useFarmOptional();
   const [marketModal, setMarketModal] = useState<number | null>(null);
   const [marketSource, setMarketSource] = useState<string>('');
-  const farmAcres = FIELDS.reduce((s, f) => s + f.acres, 0);
+  const farmAcres = fields.reduce((s, f) => s + f.acres, 0);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,7 +62,7 @@ export default function ReportsPanel({ sim }: { sim: SimState }) {
     const env = sim.env;
     const stageMeta = STAGE_RANGES.find((s) => s.id === sim.stage) || STAGE_RANGES[0];
 
-    const fieldRows = FIELDS.map((f) => {
+    const fieldRows = fields.map((f) => {
       const healthIndex = Math.round(f.health * 0.55 + sim.healthIndex * 0.45);
       const constraints = computeFieldConstraints({
         temperature: env.temperature,
@@ -195,7 +196,7 @@ export default function ReportsPanel({ sim }: { sim: SimState }) {
         points: [
           `pH ${env.soilPh} · Moisture ${env.soilMoisture.toFixed(1)}%`,
           `NPK ${Math.round(env.nitrogen)}/${Math.round(env.phosphorus)}/${Math.round(env.potassium)}`,
-          ...FIELDS.map((f) => `${f.name}: ${f.soilType} · SM ${f.soilMoisture}%`),
+          ...fields.map((f) => `${f.name}: ${f.soilType} · SM ${f.soilMoisture}%`),
         ],
       },
       {
@@ -284,7 +285,7 @@ export default function ReportsPanel({ sim }: { sim: SimState }) {
         points: [
           `Heat stress ${(sim.stressHeat * 100).toFixed(0)}% · Water ${(sim.stressWater * 100).toFixed(0)}% · Nutrient ${(sim.stressNutrient * 100).toFixed(0)}%`,
           `Engine alerts: ${sim.alerts?.length || 0} active`,
-          ...FIELDS.map((f) => `${f.name}: health ${f.health} · SM ${f.soilMoisture}%`),
+          ...fields.map((f) => `${f.name}: health ${f.health} · SM ${f.soilMoisture}%`),
         ],
       },
     ];
@@ -334,7 +335,7 @@ export default function ReportsPanel({ sim }: { sim: SimState }) {
       strongest,
       weakest,
     };
-  }, [sim, season, farmAcres]);
+  }, [sim, season, farmAcres, fields]);
 
   const overallMeta = scoreLabel(report.overall);
   const panel = 'bg-[#121a27] rounded-xl border border-[#1e2d40]';

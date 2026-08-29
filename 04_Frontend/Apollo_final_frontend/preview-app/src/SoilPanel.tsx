@@ -7,7 +7,7 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
   PieChart, Pie, Cell,
 } from 'recharts';
-import type { SoilClassId } from './simulation';
+import type { SoilClassId, FieldInfo } from './simulation';
 import { SOIL_CLASSES, getSoilClass, FIELDS } from './simulation';
 import { useFarmOptional } from './context/FarmContext';
 
@@ -285,6 +285,7 @@ export default function SoilPanel({
   setFieldSoil,
   selectedField = 'B',
   setSelectedField,
+  fields: fieldsProp,
 }: {
   soilClass?: SoilClassId;
   setSoilClass?: (id: SoilClassId) => void;
@@ -292,7 +293,9 @@ export default function SoilPanel({
   setFieldSoil?: (fieldId: string, soilId: SoilClassId) => void;
   selectedField?: string;
   setSelectedField?: (id: string) => void;
+  fields?: FieldInfo[];
 }) {
+  const fields = fieldsProp?.length ? fieldsProp : FIELDS;
   const [tab, setTab] = useState<SoilTab>('overview');
   const [showIrrigation, setShowIrrigation] = useState(false);
   const [localSoil, setLocalSoil] = useState<SoilClassId>(soilClass);
@@ -439,7 +442,7 @@ export default function SoilPanel({
                     : SOIL_TABS.find((x) => x.id === tab)?.label.toUpperCase()}
               </h2>
               <div className="text-[11px] text-slate-400 mt-0.5">
-                Field B &nbsp;•&nbsp; Block 3 &nbsp;•&nbsp; Zone 2
+                Field {selectedField} &nbsp;•&nbsp; Block 3 &nbsp;•&nbsp; Zone 2
                 {!showIrrigation && tab !== 'overview' && (
                   <span className="text-slate-500"> · Sensor data shared with overview</span>
                 )}
@@ -585,7 +588,7 @@ export default function SoilPanel({
                 </div>
                 {/* Field picker + soil type for that field */}
                 <div className="flex flex-wrap gap-1.5 mb-2">
-                  {FIELDS.map((f) => {
+                  {fields.map((f) => {
                     const sid = fieldSoilMap?.[f.id] || (f.id === selectedField ? activeSoilId : 'alluvial');
                     const sc = getSoilClass(sid);
                     const on = f.id === selectedField;
@@ -1318,7 +1321,7 @@ export default function SoilPanel({
               Soil by field
             </div>
             <div className="space-y-2 mb-2">
-              {FIELDS.map((f) => {
+              {fields.map((f) => {
                 const sid = fieldSoilMap?.[f.id] || (f.id === selectedField ? activeSoilId : 'alluvial');
                 const sc = getSoilClass(sid);
                 return (

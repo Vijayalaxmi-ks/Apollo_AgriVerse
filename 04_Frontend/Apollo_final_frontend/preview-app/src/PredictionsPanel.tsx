@@ -5,7 +5,7 @@ import {
   Sparkles, ArrowRight, RefreshCw, Server,
 } from 'lucide-react';
 import type { SimState, GrapeVarietyId } from './simulation';
-import { STAGE_RANGES, FIELDS, getCropCatalogEntry, getGrapeVariety } from './simulation';
+import { STAGE_RANGES, FIELDS, getCropCatalogEntry, getGrapeVariety, type FieldInfo } from './simulation';
 import { useFarmOptional } from './context/FarmContext';
 import { useSettingsOptional } from './context/SettingsContext';
 
@@ -498,13 +498,16 @@ export default function PredictionsPanel({
   selectedField: selectedFieldProp,
   primaryCropId,
   primaryCropLabel,
+  fields: fieldsProp,
 }: {
   sim: SimState;
   fieldVarietyMap?: Record<string, GrapeVarietyId>;
   selectedField?: string;
   primaryCropId?: string;
   primaryCropLabel?: string;
+  fields?: FieldInfo[];
 }) {
+  const fields = fieldsProp?.length ? fieldsProp : FIELDS;
   const [module, setModule] = useState<ModuleId>('yield');
   const [selectedGrowthStage, setSelectedGrowthStage] = useState<string | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string>('all');
@@ -514,7 +517,7 @@ export default function PredictionsPanel({
   const cropEntry = getCropCatalogEntry(cropId);
   const cropLabel = primaryCropLabel || cropEntry.label;
   const cropStages = useMemo(() => stagesForCrop(cropId), [cropId]);
-  const activeFieldId = selectedFieldProp || 'B';
+  const activeFieldId = selectedFieldProp || fields[0]?.id || 'A';
   const fieldVarietyId = fieldVarietyMap?.[activeFieldId] || 'thompson';
   const fieldVariety = getGrapeVariety(fieldVarietyId);
   const stageMetaCrop = useMemo(
@@ -537,13 +540,13 @@ export default function PredictionsPanel({
   const recs = evaluateReport?.primary_recommendations ?? [];
   const panel = 'bg-[#121a27] rounded-xl border border-[#1e2d40]';
 
-  /** Per-field prediction bundle for the 4 digital-twin fields (client simulation) */
+  /** Per-field prediction bundle for profile field count (client simulation) */
   const fieldPredictions = useMemo(() => {
     const stageFactor =
       sim.day < 45 ? 0.55 : sim.day < 80 ? 0.75 : sim.day < 120 ? 0.92 : 1;
     const growth = Math.max(0.7, 1 - sim.stressHeat * 0.2 - sim.stressWater * 0.25);
 
-    return FIELDS.map((f, i) => {
+    return fields.map((f, i) => {
       const healthBlend = (f.health * 0.55 + sim.healthIndex * 0.45) / 100;
       const moistureBias = (f.soilMoisture - 58) / 40; // -1..1-ish
       // tons/acre predicted for this field
@@ -603,6 +606,7 @@ export default function PredictionsPanel({
     sim.stressHeat,
     sim.stressWater,
     sim.env.humidity,
+    fields,
   ]);
 
   const activeFields =
@@ -1129,7 +1133,7 @@ export default function PredictionsPanel({
                 : 'border-[#1e2d40] text-slate-400 hover:border-slate-500'
             }`}
           >
-            All 4 Fields · {farmTotals.totalAcres.toFixed(2)} ac
+            All {fields.length} Fields · {farmTotals.totalAcres.toFixed(2)} ac
           </button>
           {fieldPredictions.map((f) => (
             <button
@@ -1167,7 +1171,7 @@ export default function PredictionsPanel({
                   </button>
                 </Tip>
                 <span className="ml-auto text-[9px] text-slate-500">
-                  {selectedFieldId === 'all' ? 'Farm average across 4 fields' : `Scoped to Field ${selectedFieldId}`}
+                  {selectedFieldId === 'all' ? `Farm average across ${fields.length} fields` : `Scoped to Field ${selectedFieldId}`}
                 </span>
               </div>
 
@@ -1222,7 +1226,7 @@ export default function PredictionsPanel({
                         <div className="rounded-xl bg-[#0b131e] border border-[#1e2d40] p-2 flex flex-col">
                           <div className="text-[9px] font-bold text-slate-400 mb-1 text-center">AI MODEL GRAPH</div>
                           <NeuralDecor />
-                          <div className="text-[8px] text-slate-500 text-center mt-auto">12 inputs × 4 fields → XGBoost → yield</div>
+                          <div className="text-[8px] text-slate-500 text-center mt-auto">12 inputs × {fields.length} fields → XGBoost → yield</div>
                         </div>
                       </div>
                     </div>
@@ -1309,7 +1313,7 @@ export default function PredictionsPanel({
                       ))}
                     </div>
                     <div className="md:col-span-4 rounded-xl bg-[#0b131e] border border-[#1e2d40] p-2">
-                      <div className="text-[9px] font-bold text-slate-400 mb-2">FIELD RISK HEAT (4 fields)</div>
+                      <div className="text-[9px] font-bold text-slate-400 mb-2">FIELD RISK HEAT ({fields.length} fields)</div>
                       <div className="grid grid-cols-2 gap-1.5">
                         {fieldPredictions.map((f) => {
                           const r = f.disease;
@@ -1800,7 +1804,7 @@ export default function PredictionsPanel({
                 <div className="flex gap-2 items-start rounded-lg bg-[#0b131e] border border-[#1e2d40] p-2">
                   <TrendingUp size={14} className="text-emerald-400 shrink-0 mt-0.5" />
                   <div>
-                    <div className="text-emerald-300 font-semibold">Yield across 4 fields</div>
+                    <div className="text-emerald-300 font-semibold">Yield across {fields.length} fields</div>
                     <div className="text-slate-500">
                       Farm {farmTotals.totalTons} t · avg {farmTotals.avgYieldPerAcre} t/ac · best {farmTotals.best?.name} ({farmTotals.best?.yieldPerAcre} t/ac)
                     </div>

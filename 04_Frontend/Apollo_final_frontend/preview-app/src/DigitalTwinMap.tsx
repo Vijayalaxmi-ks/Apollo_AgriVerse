@@ -2382,7 +2382,12 @@ export default function DigitalTwinMap({
           )}
 
           <div className="space-y-2 pt-2 border-t border-[#1e2d40]">
-            {level === 'farm' && <NavBtn label="Open Field B" onClick={() => { setSelectedField('B'); setLevel('field'); }} />}
+            {level === 'farm' && (
+              <NavBtn
+                label={`Open ${fields[0]?.name || 'Field A'}`}
+                onClick={() => { setSelectedField(fields[0]?.id || 'A'); setLevel('field'); }}
+              />
+            )}
             {level === 'field' && (
               <>
                 <NavBtn label="Plant View" onClick={() => setLevel('plant')} />

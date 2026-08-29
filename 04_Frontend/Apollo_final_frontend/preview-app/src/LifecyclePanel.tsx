@@ -4,7 +4,7 @@ import {
   CheckCircle2, ChevronRight, Calendar, Eye, EyeOff, Ruler,
 } from 'lucide-react';
 import type { SimState, LifecycleStage, GrapeVarietyId, SoilClassId } from './simulation';
-import { STAGE_RANGES, getGrapeVariety, getSoilClass, FIELDS } from './simulation';
+import { STAGE_RANGES, getGrapeVariety, getSoilClass, FIELDS, type FieldInfo } from './simulation';
 import type { VinePhase } from './VineScene';
 
 /** Polished 3D vine from v0 — lazy so Three/R3F loads only on Lifecycle tab */
@@ -869,6 +869,7 @@ export default function LifecyclePanel({
   fieldName,
   primaryCropId = 'grape',
   primaryCropLabel,
+  fields: fieldsProp,
 }: {
   sim: SimState;
   varietyId?: GrapeVarietyId | string;
@@ -877,7 +878,9 @@ export default function LifecyclePanel({
   fieldName?: string;
   primaryCropId?: string;
   primaryCropLabel?: string;
+  fields?: FieldInfo[];
 }) {
+  const fields = fieldsProp?.length ? fieldsProp : FIELDS;
   const isGrapeCrop =
     !primaryCropId ||
     primaryCropId === 'grape' ||
@@ -886,7 +889,7 @@ export default function LifecyclePanel({
 
   const variety = getGrapeVariety(varietyId);
   const soil = getSoilClass(soilId);
-  const fieldMeta = fieldId ? FIELDS.find((f) => f.id === fieldId) : undefined;
+  const fieldMeta = fieldId ? fields.find((f) => f.id === fieldId) : undefined;
   const displayField = fieldName || fieldMeta?.name || 'Selected field';
   const fieldKey = fieldId || displayField || 'default';
 
