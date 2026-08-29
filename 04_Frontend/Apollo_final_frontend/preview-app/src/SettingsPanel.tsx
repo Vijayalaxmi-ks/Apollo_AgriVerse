@@ -1,106 +1,31 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Settings, Save, RotateCcw, Bell, BellOff, Monitor, MapPin, CloudRain,
   Leaf, Beaker, Gauge, Shield, Smartphone, Moon, Sun, Volume2,
   Wifi, Database, User, Factory, Droplets, Thermometer, CheckCircle2,
-  Layers, Zap, Eye, Lock, Globe, Cpu, Sparkles, ChevronRight,
-  Activity, Radio, RefreshCw, Server,
+  Layers, Zap, Eye, Lock, Globe, Cpu, Sparkles,
+  Activity, Radio, RefreshCw, Server, Sprout, ChevronRight, Ruler,
 } from 'lucide-react';
-import type { SimState } from './simulation';
+import type { SimState, SoilClassId, GrapeVarietyId, FieldInfo } from './simulation';
+import { saveFarmProfile } from './api/farm';
+import {
+  FIELDS,
+  SOIL_CLASSES,
+  GRAPE_VARIETIES,
+  CROP_CATALOG,
+  getSoilClass,
+  getGrapeVariety,
+  getCropCatalogEntry,
+  recommendVarietiesForSoil,
+  varietyFitLevel,
+} from './simulation';
 import { useFarmOptional } from './context/FarmContext';
-
-type Units = 'metric' | 'imperial';
-type ThemeMode = 'dark' | 'oled' | 'midnight';
-type Language = 'en' | 'hi' | 'mr';
-
-export type AppSettings = {
-  farmName: string;
-  operator: string;
-  region: string;
-  district: string;
-  cropDefault: string;
-  /** Backend evaluate identity */
-  farmId: string;
-  regionId: string;
-  soilId: string;
-  waterAvailability: string;
-  city: string;
-  latitude: number;
-  longitude: number;
-  units: Units;
-  language: Language;
-  theme: ThemeMode;
-  autoPlay: boolean;
-  simSpeed: number;
-  notifyCritical: boolean;
-  notifyWeather: boolean;
-  notifyIrrigation: boolean;
-  notifyMarket: boolean;
-  notifySound: boolean;
-  emailDigest: boolean;
-  mapLabels: boolean;
-  showGrid: boolean;
-  reduceMotion: boolean;
-  dataRefreshSec: number;
-  diseaseThreshold: number;
-  moistureMin: number;
-  moistureMax: number;
-  heatAlertC: number;
-  humidityAlert: number;
-  apiLiveWeather: boolean;
-  apiMarket: boolean;
-  offlineCache: boolean;
-};
-
-const DEFAULTS: AppSettings = {
-  farmName: 'Apollo Agriverse Demo Farm',
-  operator: 'Farm Manager',
-  region: 'Maharashtra',
-  district: 'Nashik',
-  cropDefault: 'Grape (Thompson / Flame)',
-  farmId: 'FARM_MH_NASHIK_01',
-  regionId: 'REG_0002',
-  soilId: 'SOIL_00001',
-  waterAvailability: 'medium',
-  city: 'Nashik',
-  latitude: 19.9975,
-  longitude: 73.7898,
-  units: 'metric',
-  language: 'en',
-  theme: 'dark',
-  autoPlay: false,
-  simSpeed: 1,
-  notifyCritical: true,
-  notifyWeather: true,
-  notifyIrrigation: true,
-  notifyMarket: false,
-  notifySound: false,
-  emailDigest: true,
-  mapLabels: true,
-  showGrid: false,
-  reduceMotion: false,
-  dataRefreshSec: 60,
-  diseaseThreshold: 25,
-  moistureMin: 48,
-  moistureMax: 75,
-  heatAlertC: 34,
-  humidityAlert: 80,
-  apiLiveWeather: true,
-  apiMarket: true,
-  offlineCache: true,
-};
-
-const STORAGE_KEY = 'agriverse-settings-v1';
-
-function loadSettings(): AppSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
-  } catch {
-    /* ignore */
-  }
-  return { ...DEFAULTS };
-}
+import {
+  useSettings,
+  DEFAULT_APP_SETTINGS,
+  generateFarmIds,
+  type AppSettings,
+} from './context/SettingsContext';
 
 type Props = {
   sim: SimState;
@@ -109,6 +34,12 @@ type Props = {
   setMode?: (m: 'auto' | 'manual') => void;
   isPlaying?: boolean;
   setIsPlaying?: (v: boolean) => void;
+  fieldSoilMap?: Record<string, SoilClassId>;
+  setFieldSoil?: (fieldId: string, soilId: SoilClassId) => void;
+  fieldVarietyMap?: Record<string, GrapeVarietyId>;
+  setFieldVariety?: (fieldId: string, varietyId: GrapeVarietyId) => void;
+  /** Dynamic fields from farmer field-count setting */
+  fields?: FieldInfo[];
 };
 
 export default function SettingsPanel({
@@ -118,48 +49,254 @@ export default function SettingsPanel({
   setMode,
   isPlaying = false,
   setIsPlaying,
+  fieldSoilMap,
+  setFieldSoil,
+  fieldVarietyMap,
+  setFieldVariety,
+  fields = FIELDS,
 }: Props) {
-  const [cfg, setCfg] = useState<AppSettings>(() => loadSettings());
+  const {
+    settings: cfg,
+    setSettings,
+    replaceSettings,
+    resetSettings,
+    profiles,
+    activeProfileId,
+    createProfile,
+    switchProfile,
+    deleteProfile,
+    saveActiveProfile,
+    profileComplete,
+  } = useSettings();
   const [savedFlash, setSavedFlash] = useState(false);
-  const [section, setSection] = useState<'farm' | 'sim' | 'alerts' | 'display' | 'data' | 'account'>('farm');
+
+  type FieldMeasure = {
+    /** Field area in hectares */
+    areaHa: string;
+    /** Observed / target yield t/ha */
+    yieldTPerHa: string;
+    /** Planting density plants/ha */
+    densityPerHa: string;
+    /** Seasonal irrigation mm (depth) */
+    irrigationMm: string;
+    notes: string;
+  };
+  const emptyMeasure = (): FieldMeasure => ({
+    areaHa: '',
+    yieldTPerHa: '',
+    densityPerHa: '',
+    irrigationMm: '',
+    notes: '',
+  });
+  const MEASURES_KEY = 'agriverse-lifecycle-measures-v1';
+  const [fieldMeasures, setFieldMeasures] = useState<Record<string, FieldMeasure>>(() => {
+    try {
+      const raw = localStorage.getItem(MEASURES_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return {};
+  });
+  const [measuresFlash, setMeasuresFlash] = useState(false);
+  const patchFieldMeasure = (fieldId: string, patch: Partial<FieldMeasure>) => {
+    setFieldMeasures((prev) => ({
+      ...prev,
+      [fieldId]: { ...(prev[fieldId] || emptyMeasure()), ...patch },
+    }));
+  };
+  const saveFieldMeasures = () => {
+    try {
+      localStorage.setItem(MEASURES_KEY, JSON.stringify(fieldMeasures));
+      setMeasuresFlash(true);
+      window.setTimeout(() => setMeasuresFlash(false), 1600);
+      window.dispatchEvent(new CustomEvent('agriverse-field-measures-saved'));
+    } catch { /* ignore */ }
+    // Also push to backend when farm id is known
+    const fid = cfg.farmId?.trim();
+    if (fid) {
+      const fieldPayload = (fields.length ? fields : []).map((f) => {
+        const m = fieldMeasures[f.id] || emptyMeasure();
+        return {
+          field_id: f.id,
+          name: f.name,
+          acres: f.acres,
+          soil_class: fieldSoilMap?.[f.id] || cfg.defaultSoilClass,
+          crop_id: fieldCropMap[f.id] || cfg.primaryCrop,
+          grape_variety: fieldVarietyMap?.[f.id] || 'thompson',
+          area_ha: m.areaHa,
+          yield_t_per_ha: m.yieldTPerHa,
+          density_per_ha: m.densityPerHa,
+          irrigation_mm: m.irrigationMm,
+          notes: m.notes,
+        };
+      });
+      void saveFarmProfile({
+        farm_id: fid,
+        region_id: cfg.regionId || undefined,
+        soil_id: cfg.soilId || undefined,
+        farm_name: cfg.farmName,
+        city: cfg.city,
+        primary_crop: cfg.primaryCrop,
+        default_soil_class: cfg.defaultSoilClass,
+        field_count: cfg.fieldCount,
+        fields: fieldPayload,
+        measures: fieldMeasures,
+      }).catch(() => { /* offline ok */ });
+    }
+  };
+
+
+  const [section, setSection] = useState<'farm' | 'soilcrop' | 'sim' | 'alerts' | 'display' | 'data' | 'account'>('farm');
+  const [newProfileName, setNewProfileName] = useState('');
+
+  const FIELD_CROP_KEY = 'agriverse-field-crops-v1';
+  const [fieldCropMap, setFieldCropMap] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem(FIELD_CROP_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return {};
+  });
+  const setFieldCrop = (fieldId: string, cropId: string) => {
+    setFieldCropMap((prev) => {
+      const next = { ...prev, [fieldId]: cropId };
+      try {
+        localStorage.setItem(FIELD_CROP_KEY, JSON.stringify(next));
+      } catch { /* ignore */ }
+      return next;
+    });
+  };
   const farmCtx = useFarmOptional();
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
-    } catch {
-      /* ignore */
-    }
-  }, [cfg]);
-
   const patch = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    setCfg((c) => ({ ...c, [key]: value }));
+    setSettings({ [key]: value });
   };
 
   const save = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
-    // Push farm identity into shared FarmContext → triggers weather + evaluate
+    // Generate backend IDs from farmer-entered data if still blank
+    let farmId = cfg.farmId;
+    let regionId = cfg.regionId;
+    let soilId = cfg.soilId;
+    if (!farmId?.trim() || !regionId?.trim() || !soilId?.trim()) {
+      const gen = generateFarmIds({
+        farmName: cfg.farmName,
+        region: cfg.region,
+        district: cfg.district,
+        city: cfg.city,
+      });
+      if (!farmId?.trim()) farmId = gen.farmId;
+      if (!regionId?.trim()) regionId = gen.regionId;
+      if (!soilId?.trim()) soilId = gen.soilId;
+      setSettings({ farmId, regionId, soilId });
+    }
+
+    const lat = cfg.latitude === '' ? 0 : Number(cfg.latitude);
+    const lon = cfg.longitude === '' ? 0 : Number(cfg.longitude);
+
+    // Persist field measurements locally
+    try {
+      localStorage.setItem(MEASURES_KEY, JSON.stringify(fieldMeasures));
+      window.dispatchEvent(new CustomEvent('agriverse-field-measures-saved'));
+    } catch {
+      /* ignore */
+    }
+
+    saveActiveProfile();
+
+    // Push farm identity into shared FarmContext → weather + evaluate + twin step
     if (farmCtx) {
       const next = {
-        farm_id: cfg.farmId,
-        region_id: cfg.regionId,
-        soil_id: cfg.soilId,
+        farm_id: farmId,
+        region_id: regionId,
+        soil_id: soilId,
         water_availability: cfg.waterAvailability,
-        latitude: cfg.latitude,
-        longitude: cfg.longitude,
+        latitude: lat,
+        longitude: lon,
         city: cfg.city,
         farmName: cfg.farmName,
       };
       farmCtx.saveFarm({ ...farmCtx.farm, ...next });
-      void farmCtx.refreshAll();
+    }
+
+    // Build per-field payload for backend
+    const fieldPayload = (fields.length ? fields : []).map((f) => {
+      const m = fieldMeasures[f.id] || emptyMeasure();
+      return {
+        field_id: f.id,
+        name: f.name,
+        acres: f.acres,
+        soil_class: fieldSoilMap?.[f.id] || cfg.defaultSoilClass,
+        crop_id: fieldCropMap[f.id] || cfg.primaryCrop,
+        grape_variety: fieldVarietyMap?.[f.id] || 'thompson',
+        canopy_cm: m.canopyCm,
+        shoot_count: m.shootCount,
+        cluster_count: m.clusterCount,
+        brix: m.brix,
+        notes: m.notes,
+      };
+    });
+
+    // Save to backend (profile + fields + measures) then refresh APIs / step twin
+    void (async () => {
+      try {
+        const res = await saveFarmProfile({
+          farm_id: farmId,
+          region_id: regionId,
+          soil_id: soilId,
+          farm_name: cfg.farmName,
+          operator: cfg.operator,
+          region: cfg.region,
+          district: cfg.district,
+          city: cfg.city,
+          latitude: lat || undefined,
+          longitude: lon || undefined,
+          water_availability: cfg.waterAvailability,
+          primary_crop: cfg.primaryCrop,
+          default_soil_class: cfg.defaultSoilClass,
+          field_count: cfg.fieldCount,
+          fields: fieldPayload,
+          measures: fieldMeasures,
+          profile_label: cfg.farmName || cfg.operator || farmId,
+        });
+        if (res?.success) {
+          setSavedFlash(true);
+        }
+      } catch (err) {
+        console.warn('Backend profile save failed (local save still applied):', err);
+      }
+
+      if (farmCtx && cfg.city?.trim() && lat && lon) {
+        try {
+          await farmCtx.refreshAll();
+          await farmCtx.stepTwinFromLive();
+        } catch {
+          /* twin optional if backend offline */
+        }
+      }
+    })();
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent('agriverse-settings-saved', {
+          detail: {
+            fieldCount: cfg.fieldCount,
+            primaryCrop: cfg.primaryCrop,
+            defaultSoilClass: cfg.defaultSoilClass,
+            city: cfg.city,
+            farmId,
+            fields: fieldPayload,
+          },
+        }),
+      );
+    } catch {
+      /* ignore */
     }
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 2000);
   };
 
   const reset = () => {
-    setCfg({ ...DEFAULTS });
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULTS));
+    replaceSettings({ ...DEFAULT_APP_SETTINGS });
+    resetSettings();
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 2000);
   };
@@ -288,7 +425,8 @@ export default function SettingsPanel({
     sub: string;
     tint: string;
   }[] = [
-    { id: 'farm', icon: Factory, label: 'Farm profile', sub: 'Identity & crop', tint: 'from-emerald-500/20 to-transparent' },
+    { id: 'farm', icon: Factory, label: 'Farm profile', sub: 'Fields · soil · crop · ha', tint: 'from-emerald-500/20 to-transparent' },
+    { id: 'soilcrop', icon: Layers, label: 'Soil & crop variety', sub: 'Twin visuals only', tint: 'from-violet-500/20 to-transparent' },
     { id: 'sim', icon: Cpu, label: 'Simulation', sub: 'Twin engine', tint: 'from-violet-500/20 to-transparent' },
     { id: 'alerts', icon: Bell, label: 'Alerts', sub: 'Notify & limits', tint: 'from-rose-500/20 to-transparent' },
     { id: 'display', icon: Monitor, label: 'Display', sub: 'Theme & units', tint: 'from-sky-500/20 to-transparent' },
@@ -430,6 +568,91 @@ export default function SettingsPanel({
           <div className="lg:col-span-9 space-y-4">
             {section === 'farm' && (
               <>
+                {/* Multi-profile manager */}
+                <div className="rounded-3xl border border-sky-500/20 bg-[#0c121c] overflow-hidden">
+                  <div className="px-5 py-4 border-b border-white/5 bg-gradient-to-r from-sky-500/10 via-transparent to-transparent flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-500/15 border border-sky-500/30">
+                        <User size={14} className="text-sky-300" />
+                      </div>
+                      <div>
+                        <div className="text-[12px] font-bold text-white">Farmer profiles</div>
+                        <div className="text-[9px] text-slate-500">
+                          Create multiple farms — each keeps its own location, soil & crop settings
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-[9px] text-slate-500">{profiles.length} saved</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    {profiles.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-[#2a3a52] bg-[#0b131e]/60 p-4 text-center">
+                        <p className="text-[12px] text-slate-300 font-semibold">No profiles yet</p>
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          Enter your farm details below, then save — or create a blank profile to start.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {profiles.map((p) => (
+                          <div
+                            key={p.id}
+                            className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] transition ${
+                              p.id === activeProfileId
+                                ? 'border-sky-400/50 bg-sky-500/15 text-sky-100'
+                                : 'border-[#1e2d40] bg-[#0b131e] text-slate-400'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => switchProfile(p.id)}
+                              className="font-semibold hover:text-white"
+                            >
+                              {p.label || 'Untitled'}
+                            </button>
+                            <button
+                              type="button"
+                              title="Delete profile"
+                              onClick={() => {
+                                if (window.confirm(`Delete profile “${p.label}”?`)) deleteProfile(p.id);
+                              }}
+                              className="text-slate-600 hover:text-rose-400 ml-0.5"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="rounded-xl border border-dashed border-sky-500/25 bg-[#0b131e]/50 p-3 space-y-2">
+                      <div className="text-[10px] font-semibold text-slate-400">Create a new farmer profile</div>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <input
+                          className={`${inputCls} max-w-[220px]`}
+                          placeholder="Profile name (e.g. Dakshini farm)"
+                          value={newProfileName}
+                          onChange={(e) => setNewProfileName(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            createProfile(newProfileName.trim() || undefined);
+                            setNewProfileName('');
+                          }}
+                          className="text-[11px] font-semibold px-3 py-2 rounded-xl border border-sky-500/40 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 transition"
+                        >
+                          Create profile
+                        </button>
+                      </div>
+                      {!profileComplete && (
+                        <p className="text-[10px] text-amber-400/90">
+                          Fill farm name, city & coordinates below, then Save & refresh APIs.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="rounded-3xl border border-white/5 bg-[#0c121c] overflow-hidden">
                   <div className="px-5 py-4 border-b border-white/5 bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent flex items-center gap-2">
                     <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 border border-emerald-500/30">
@@ -437,16 +660,16 @@ export default function SettingsPanel({
                     </div>
                     <div>
                       <div className="text-[12px] font-bold text-white">Farm identity</div>
-                      <div className="text-[9px] text-slate-500">Shown across reports and alerts</div>
+                      <div className="text-[9px] text-slate-500">Entered by the farmer — empty until you fill it in</div>
                     </div>
                   </div>
                   <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {(
                       [
-                        { key: 'farmName' as const, label: 'Farm name', icon: Factory },
-                        { key: 'operator' as const, label: 'Operator', icon: User },
-                        { key: 'region' as const, label: 'State / region', icon: Globe },
-                        { key: 'district' as const, label: 'District / belt', icon: MapPin },
+                        { key: 'farmName' as const, label: 'Farm name', icon: Factory, ph: 'e.g. Green Valley Vineyard' },
+                        { key: 'operator' as const, label: 'Operator', icon: User, ph: 'Your name' },
+                        { key: 'region' as const, label: 'State / region', icon: Globe, ph: 'e.g. Maharashtra' },
+                        { key: 'district' as const, label: 'District / belt', icon: MapPin, ph: 'e.g. Nashik' },
                       ] as const
                     ).map((f) => (
                       <div key={f.key}>
@@ -456,20 +679,299 @@ export default function SettingsPanel({
                         <input
                           className={inputCls}
                           value={cfg[f.key]}
+                          placeholder={f.ph}
                           onChange={(e) => patch(f.key, e.target.value)}
                         />
                       </div>
                     ))}
                     <div className="sm:col-span-2">
                       <div className={labelCls}>
-                        <Leaf size={10} /> Default crop focus
+                        <Leaf size={10} /> Notes / market focus
                       </div>
                       <input
                         className={inputCls}
                         value={cfg.cropDefault}
+                        placeholder="Optional notes (e.g. export table grapes)"
                         onChange={(e) => patch('cropDefault', e.target.value)}
                       />
                     </div>
+
+                    {/* Field count + primary crop + default soil — drives all panels */}
+                    <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      <div>
+                        <div className={labelCls}>Number of fields</div>
+                        <select
+                          className={inputCls}
+                          value={cfg.fieldCount}
+                          onChange={(e) => patch('fieldCount', Number(e.target.value))}
+                        >
+                          {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                            <option key={n} value={n}>
+                              {n} field{n > 1 ? 's' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[9px] text-slate-500 mt-1">Digital Twin pads scale to this count</p>
+                      </div>
+
+                      <div className="md:col-span-2 rounded-xl border border-sky-500/20 bg-sky-500/5 px-3 py-2.5">
+                        <div className="text-[11px] font-semibold text-sky-200">Per-field soil, crop & measurements (ha)</div>
+                        <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                          Set real farm data for each field below. Values save with the profile and sync to the backend on Save.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Per-field soil, crop (actual farm) + hectare measurements — part of profile creation */}
+                <div className="rounded-3xl border border-emerald-500/20 bg-[#0c121c] overflow-hidden">
+                  <div className="px-5 py-4 border-b border-white/5 bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/15 border border-emerald-500/30">
+                        <Layers size={14} className="text-emerald-300" />
+                      </div>
+                      <div>
+                        <div className="text-[12px] font-bold text-white">Fields — soil, crop & measurements</div>
+                        <div className="text-[9px] text-slate-500">
+                          Actual farm data per field (area in hectares) · saved with this farmer profile
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={save}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/35 bg-emerald-500/15 px-3 py-1.5 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/25 transition"
+                    >
+                      <Save size={13} />
+                      {savedFlash ? 'Saved' : 'Save profile'}
+                    </button>
+                  </div>
+                  <div className="p-5 space-y-4">
+                    {(fields.length ? fields : [{ id: 'A', name: 'Field A', acres: 1 } as FieldInfo]).map((f) => {
+                      const sid = fieldSoilMap?.[f.id] || (cfg.defaultSoilClass as SoilClassId) || 'alluvial';
+                      const sc = getSoilClass(sid);
+                      const cropId = fieldCropMap[f.id] || cfg.primaryCrop || 'grape';
+                      const cropEntry = getCropCatalogEntry(cropId);
+                      const m = fieldMeasures[f.id] || emptyMeasure();
+                      const acresFromHa = m.areaHa ? (Number(m.areaHa) * 2.47105).toFixed(2) : String(f.acres);
+                      return (
+                        <div
+                          key={f.id}
+                          className="rounded-2xl border border-[#1e2d40] bg-[#0b131e]/80 p-4 space-y-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-3 h-3 rounded-sm border border-white/20 shrink-0"
+                                style={{ background: sc.base }}
+                              />
+                              <span className="text-[13px] font-bold text-white">{f.name}</span>
+                              <span className="text-[10px] text-slate-500">
+                                {m.areaHa ? `${m.areaHa} ha` : `${f.acres} ac`}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-sky-300 font-semibold">{cropEntry.label}</span>
+                          </div>
+
+                          <div>
+                            <div className={labelCls}>Soil class (this field)</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {SOIL_CLASSES.map((s) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  title={s.label}
+                                  onClick={() => setFieldSoil?.(f.id, s.id)}
+                                  className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                                    sid === s.id
+                                      ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-400/30'
+                                      : 'border-[#1e2d40] bg-[#16202d] text-slate-400 hover:border-slate-500'
+                                  }`}
+                                >
+                                  <span
+                                    className="w-3 h-3 rounded-sm border border-black/30 shrink-0"
+                                    style={{ background: s.base }}
+                                  />
+                                  {s.shortLabel}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className={labelCls}>Crop type (this field)</div>
+                            <select
+                              className={inputCls}
+                              value={cropId}
+                              onChange={(e) => {
+                                setFieldCrop(f.id, e.target.value);
+                                if (f.id === fields[0]?.id) {
+                                  patch('primaryCrop', e.target.value);
+                                  const entry = getCropCatalogEntry(e.target.value);
+                                  if (entry.waterNeed) patch('waterAvailability', entry.waterNeed);
+                                }
+                              }}
+                            >
+                              {CROP_CATALOG.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.label} · {c.category}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <div className={labelCls}>
+                              <Ruler size={10} /> Measurements (hectares)
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                              {(
+                                [
+                                  ['areaHa', 'Area (ha)'],
+                                  ['yieldTPerHa', 'Yield (t/ha)'],
+                                  ['densityPerHa', 'Density (plants/ha)'],
+                                  ['irrigationMm', 'Irrigation (mm)'],
+                                ] as const
+                              ).map(([key, label]) => (
+                                <label key={key} className="block">
+                                  <span className="text-[9px] uppercase text-slate-500">{label}</span>
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    value={m[key]}
+                                    onChange={(e) => patchFieldMeasure(f.id, { [key]: e.target.value })}
+                                    className={inputCls}
+                                    placeholder="—"
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                            {m.areaHa && (
+                              <p className="text-[9px] text-slate-500 mt-1">≈ {acresFromHa} acres</p>
+                            )}
+                            <label className="block mt-2">
+                              <span className="text-[9px] uppercase text-slate-500">Notes</span>
+                              <textarea
+                                value={m.notes}
+                                onChange={(e) => patchFieldMeasure(f.id, { notes: e.target.value })}
+                                rows={2}
+                                className={`${inputCls} resize-none`}
+                                placeholder="Field notes…"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <p className="text-[10px] text-slate-500 leading-snug">
+                      All field soil, crop and hectare measurements save with <strong className="text-white">Save</strong> /
+                      <strong className="text-white"> Save &amp; refresh APIs</strong> (local + backend).
+                      Digital Twin grape variety is set in the <span className="text-emerald-300">Soil &amp; crop variety</span> tab.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Environment-based crop recommendations (any crop) — from evaluate API + soil heuristics */}
+                <div className="rounded-3xl border border-lime-500/20 bg-[#0c121c] overflow-hidden">
+                  <div className="px-5 py-4 border-b border-white/5 bg-gradient-to-r from-lime-500/10 via-transparent to-transparent flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-lime-500/15 border border-lime-500/30">
+                        <Sprout size={14} className="text-lime-300" />
+                      </div>
+                      <div>
+                        <div className="text-[12px] font-bold text-white">Best crop recommendations</div>
+                        <div className="text-[9px] text-slate-500">
+                          Ranked by field soil, water & climate — any suitable crop (not limited to grapes)
+                        </div>
+                      </div>
+                    </div>
+                    {farmCtx?.evaluateLoading && (
+                      <span className="text-[9px] text-slate-400 animate-pulse">Refreshing…</span>
+                    )}
+                  </div>
+                  <div className="p-5 space-y-3">
+                    {(() => {
+                      const recs = farmCtx?.evaluateReport?.primary_recommendations ?? [];
+                      const focus = farmCtx?.evaluateReport?.focus_crop_assessment;
+                      const soilHint =
+                        fieldSoilMap &&
+                        getSoilClass(fieldSoilMap[Object.keys(fieldSoilMap)[0] || 'B'] || 'alluvial');
+                      if (recs.length === 0 && !focus) {
+                        return (
+                          <div className="rounded-2xl border border-[#1e2d40] bg-[#0b131e]/80 p-4 text-[11px] text-slate-400 leading-relaxed">
+                            <p className="text-slate-300 font-semibold mb-1">Heuristic fit from soil class</p>
+                            <p>{soilHint?.cropFit || 'Save backend farm profile and refresh APIs to load full suitability scores.'}</p>
+                            <p className="mt-2 text-[10px] text-slate-500">
+                              Water: {cfg.waterAvailability} · Soil: {soilHint?.label || '—'} · City: {cfg.city}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                save();
+                              }}
+                              className="mt-3 text-[11px] font-semibold px-3 py-1.5 rounded-xl border border-lime-500/40 bg-lime-500/10 text-lime-200 hover:bg-lime-500/20 transition"
+                            >
+                              Save profile & fetch recommendations
+                            </button>
+                          </div>
+                        );
+                      }
+                      const list = [
+                        ...(focus ? [focus] : []),
+                        ...recs.filter((r) => r.crop_name !== focus?.crop_name),
+                      ].slice(0, 8);
+                      return (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {list.map((r) => {
+                            const score = Number(r.final_suitability_score ?? r.agronomic_score ?? 0);
+                            const band =
+                              r.suitability_band ||
+                              (score >= 80 ? 'Excellent' : score >= 65 ? 'Good' : score >= 50 ? 'Fair' : 'Limited');
+                            return (
+                              <div
+                                key={r.crop_name}
+                                className={`rounded-2xl border p-3.5 transition ${
+                                  r.is_focus_crop || r.crop_name === focus?.crop_name
+                                    ? 'border-lime-400/40 bg-lime-500/10'
+                                    : 'border-[#1e2d40] bg-[#0b131e]/80'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="text-[13px] font-bold text-white">{r.crop_name}</div>
+                                    <div className="text-[9px] text-slate-500 mt-0.5">
+                                      {band}
+                                      {r.water_requirement ? ` · Water: ${r.water_requirement}` : ''}
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <div className="text-[16px] font-bold text-lime-300 tabular-nums">
+                                      {score.toFixed(0)}
+                                    </div>
+                                    <div className="text-[8px] uppercase text-slate-500">score</div>
+                                  </div>
+                                </div>
+                                {r.expected_yield_tons_ha != null && (
+                                  <div className="text-[10px] text-slate-400 mt-2">
+                                    Est. yield ~{Number(r.expected_yield_tons_ha).toFixed(1)} t/ha
+                                  </div>
+                                )}
+                                {(r.pros?.[0] || r.cons?.[0]) && (
+                                  <div className="mt-2 text-[9px] text-slate-500 leading-snug line-clamp-2">
+                                    {r.pros?.[0] || r.cons?.[0]}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                    <p className="text-[9px] text-slate-500 leading-snug">
+                      These recommendations use soil profile, water availability, and climate from your farm settings.
+                      Set per-field soil & crop in the Soil & crop variety tab. Grape varieties apply only when a field crop is grape.
+                    </p>
                   </div>
                 </div>
 
@@ -482,37 +984,47 @@ export default function SettingsPanel({
                       <div>
                         <div className="text-[12px] font-bold text-white">Backend farm profile</div>
                         <div className="text-[9px] text-slate-500">
-                          Drives POST /api/evaluate and GET /weather · {farmCtx?.apiBase || 'API'}
+                          Leave IDs blank — they are generated when you save · {farmCtx?.apiBase || 'API'}
                         </div>
                       </div>
                     </div>
                     {farmCtx && (
                       <span
                         className={`text-[9px] px-2 py-0.5 rounded border ${
-                          farmCtx.apiStatus === 'ok'
+                          profileComplete && farmCtx.apiStatus === 'ok'
                             ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                            : farmCtx.apiStatus === 'degraded'
-                              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                              : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                            : !profileComplete
+                              ? 'bg-slate-500/15 text-slate-400 border-slate-500/30'
+                              : farmCtx.apiStatus === 'degraded'
+                                ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                                : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
                         }`}
                       >
-                        {farmCtx.apiStatus === 'ok'
-                          ? 'API ok'
-                          : farmCtx.apiStatus === 'degraded'
-                            ? 'Degraded'
-                            : farmCtx.apiStatus === 'down'
-                              ? 'Down'
-                              : 'Unknown'}
+                        {!profileComplete
+                          ? 'Awaiting farmer data'
+                          : farmCtx.apiStatus === 'ok'
+                            ? 'API ok'
+                            : farmCtx.apiStatus === 'degraded'
+                              ? 'Degraded'
+                              : farmCtx.apiStatus === 'down'
+                                ? 'Down'
+                                : 'Unknown'}
                       </span>
                     )}
                   </div>
                   <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {!profileComplete && (
+                      <div className="sm:col-span-2 rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[10px] text-amber-200/90 leading-relaxed">
+                        Fields start empty. Enter farm name, city, latitude &amp; longitude, then{' '}
+                        <strong>Save &amp; refresh APIs</strong>. Farm / region / soil IDs are auto-generated from your entries — no static demo farmer data.
+                      </div>
+                    )}
                     {(
                       [
-                        { key: 'farmId' as const, label: 'Farm ID' },
-                        { key: 'regionId' as const, label: 'Region ID' },
-                        { key: 'soilId' as const, label: 'Soil ID' },
-                        { key: 'city' as const, label: 'City (weather)' },
+                        { key: 'farmId' as const, label: 'Farm ID', ph: 'Auto on save' },
+                        { key: 'regionId' as const, label: 'Region ID', ph: 'Auto on save' },
+                        { key: 'soilId' as const, label: 'Soil ID', ph: 'Auto on save' },
+                        { key: 'city' as const, label: 'City (weather)', ph: 'e.g. Nashik' },
                       ] as const
                     ).map((f) => (
                       <div key={f.key}>
@@ -520,6 +1032,7 @@ export default function SettingsPanel({
                         <input
                           className={inputCls}
                           value={cfg[f.key]}
+                          placeholder={f.ph}
                           onChange={(e) => patch(f.key, e.target.value)}
                         />
                       </div>
@@ -543,7 +1056,10 @@ export default function SettingsPanel({
                         type="number"
                         step="0.0001"
                         value={cfg.latitude}
-                        onChange={(e) => patch('latitude', Number(e.target.value))}
+                        placeholder="e.g. 19.9975"
+                        onChange={(e) =>
+                          patch('latitude', e.target.value === '' ? '' : Number(e.target.value))
+                        }
                       />
                     </div>
                     <div>
@@ -553,7 +1069,10 @@ export default function SettingsPanel({
                         type="number"
                         step="0.0001"
                         value={cfg.longitude}
-                        onChange={(e) => patch('longitude', Number(e.target.value))}
+                        placeholder="e.g. 73.7898"
+                        onChange={(e) =>
+                          patch('longitude', e.target.value === '' ? '' : Number(e.target.value))
+                        }
                       />
                     </div>
                     <div className="sm:col-span-2 flex flex-wrap gap-2">
@@ -570,7 +1089,7 @@ export default function SettingsPanel({
                         <button
                           type="button"
                           onClick={() => void farmCtx.refreshAll()}
-                          className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border border-[#1e2d40] text-slate-300"
+                          className="flex items-center gap-1.5 text-[11px] px-3 py-2 rounded-lg border border-[#1e2d40] text-slate-300 hover:border-sky-500/40"
                         >
                           <RefreshCw size={12} /> Re-check health
                         </button>
@@ -600,6 +1119,138 @@ export default function SettingsPanel({
                       <div className="text-[9px] text-slate-500 mt-1">{c.s}</div>
                     </div>
                   ))}
+                </div>
+              </>
+            )}
+
+            
+
+            {section === 'soilcrop' && (
+              <>
+                <div className="rounded-3xl border border-violet-500/20 bg-[#0c121c] overflow-hidden">
+                  <div className="px-5 py-4 border-b border-white/5 bg-gradient-to-r from-violet-500/10 via-transparent to-transparent flex items-center gap-2">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/15 border border-violet-500/30">
+                      <Layers size={14} className="text-violet-300" />
+                    </div>
+                    <div>
+                      <div className="text-[12px] font-bold text-white">Digital Twin — soil & grape variety</div>
+                      <div className="text-[9px] text-slate-500">
+                        Visual twin only: soil colours and grape variety / berries on the map (not operational farm crop mix)
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-5 space-y-4">
+                    <p className="text-[11px] text-slate-400 leading-relaxed rounded-xl border border-[#1e2d40] bg-[#0b131e] px-3 py-2">
+                      Use <span className="text-white font-semibold">Farm profile</span> for real field crop type and hectare measurements.
+                      This panel only drives the <span className="text-violet-300 font-semibold">Digital Twin</span> appearance
+                      (soil pad colours + grape vine variety).
+                    </p>
+
+                    {fieldSoilMap && setFieldSoil && fieldVarietyMap && setFieldVariety ? (
+                      (fields.length ? fields : []).map((f) => {
+                        const sid = fieldSoilMap[f.id] || (cfg.defaultSoilClass as SoilClassId) || 'alluvial';
+                        const sc = getSoilClass(sid);
+                        const vid = fieldVarietyMap[f.id] || 'thompson';
+                        const vv = getGrapeVariety(vid);
+                        const top = recommendVarietiesForSoil(sid)[0];
+                        const score = vv.soilScore[sid as SoilClassId] ?? 50;
+                        const fit = varietyFitLevel(score);
+                        return (
+                          <div
+                            key={f.id}
+                            className="rounded-2xl border border-[#1e2d40] bg-[#0b131e]/80 p-4 space-y-3"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="w-3 h-3 rounded-sm border border-white/20 shrink-0"
+                                  style={{ background: sc.base }}
+                                />
+                                <span className="text-[13px] font-bold text-white">{f.name}</span>
+                                <span className="text-[10px] text-slate-500">Twin parcel</span>
+                              </div>
+                              <span className="text-[10px] text-slate-400">
+                                Fit:{' '}
+                                <span
+                                  className={
+                                    fit === 'Best' || fit === 'Good'
+                                      ? 'text-emerald-400 font-semibold'
+                                      : fit === 'Fair'
+                                        ? 'text-amber-400 font-semibold'
+                                        : 'text-rose-400 font-semibold'
+                                  }
+                                >
+                                  {fit}
+                                </span>
+                              </span>
+                            </div>
+
+                            <div>
+                              <div className={labelCls}>Twin soil class</div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {SOIL_CLASSES.map((s) => (
+                                  <button
+                                    key={s.id}
+                                    type="button"
+                                    title={s.label}
+                                    onClick={() => setFieldSoil(f.id, s.id)}
+                                    className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                                      sid === s.id
+                                        ? 'border-violet-400/50 bg-violet-500/15 text-violet-100 ring-1 ring-violet-400/30'
+                                        : 'border-[#1e2d40] bg-[#16202d] text-slate-400 hover:border-slate-500'
+                                    }`}
+                                  >
+                                    <span
+                                      className="w-3 h-3 rounded-sm border border-black/30 shrink-0"
+                                      style={{ background: s.base }}
+                                    />
+                                    {s.shortLabel}
+                                  </button>
+                                ))}
+                              </div>
+                              <p className="text-[9px] text-slate-500 mt-1.5 leading-snug">{sc.description}</p>
+                            </div>
+
+                            <div>
+                              <div className={labelCls}>Grape variety (twin vines)</div>
+                              <select
+                                className={inputCls}
+                                value={vid}
+                                onChange={(e) => setFieldVariety(f.id, e.target.value as GrapeVarietyId)}
+                              >
+                                {GRAPE_VARIETIES.map((v) => {
+                                  const vs = v.soilScore[sid as SoilClassId] ?? 50;
+                                  const vf = varietyFitLevel(vs);
+                                  return (
+                                    <option key={v.id} value={v.id}>
+                                      {v.label} · {vf} ({vs})
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              <div className="text-[9px] text-slate-400 mt-1.5 leading-snug">
+                                Selected: <span className="text-white font-semibold">{vv.label}</span>
+                                {top && (
+                                  <>
+                                    {' '}
+                                    · AI suggest:{' '}
+                                    <span className="text-emerald-300 font-semibold">{top.variety.label}</span>
+                                  </>
+                                )}
+                              </div>
+                              <p className="text-[9px] text-slate-500 mt-1 leading-snug">{vv.notes}</p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <p className="text-[11px] text-slate-500">Field maps not available.</p>
+                    )}
+                    <p className="text-[10px] text-slate-500 leading-snug">
+                      Changes apply to the Digital Twin map immediately (soil colours, berry colours). Save the profile
+                      from Farm profile to persist and sync with the backend.
+                    </p>
+                  </div>
                 </div>
               </>
             )}
@@ -779,8 +1430,8 @@ export default function SettingsPanel({
                     <Eye size={14} className="text-sky-300" />
                   </div>
                   <div>
-                    <div className="text-[12px] font-bold text-white">Display & localisation</div>
-                    <div className="text-[9px] text-slate-500">Theme, units, language, map chrome</div>
+                    <div className="text-[12px] font-bold text-white">Display</div>
+                    <div className="text-[9px] text-slate-500">Theme, units, map chrome</div>
                   </div>
                 </div>
                 <div className="p-5 space-y-5">
@@ -837,32 +1488,6 @@ export default function SettingsPanel({
                             {u.label}
                           </div>
                           <div className="text-[9px] text-slate-500">{u.desc}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className={labelCls}>Language</div>
-                    <div className="flex flex-wrap gap-2">
-                      {(
-                        [
-                          { id: 'en' as const, label: 'English' },
-                          { id: 'hi' as const, label: 'हिन्दी' },
-                          { id: 'mr' as const, label: 'मराठी' },
-                        ] as const
-                      ).map((l) => (
-                        <button
-                          key={l.id}
-                          type="button"
-                          onClick={() => patch('language', l.id)}
-                          className={`text-[12px] font-semibold px-4 py-2.5 rounded-xl border transition ${
-                            cfg.language === l.id
-                              ? 'bg-sky-600/25 border-sky-400/45 text-sky-100'
-                              : 'border-[#1e2d40] text-slate-400 hover:border-slate-500'
-                          }`}
-                        >
-                          {l.label}
                         </button>
                       ))}
                     </div>

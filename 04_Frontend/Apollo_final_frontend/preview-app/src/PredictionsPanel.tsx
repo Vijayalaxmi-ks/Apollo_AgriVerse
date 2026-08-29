@@ -4,9 +4,10 @@ import {
   Thermometer, CloudRain, Activity, CheckCircle2, Info,
   Sparkles, ArrowRight, RefreshCw, Server,
 } from 'lucide-react';
-import type { SimState } from './simulation';
-import { STAGE_RANGES, FIELDS } from './simulation';
+import type { SimState, GrapeVarietyId } from './simulation';
+import { STAGE_RANGES, FIELDS, getCropCatalogEntry, getGrapeVariety } from './simulation';
 import { useFarmOptional } from './context/FarmContext';
+import { useSettingsOptional } from './context/SettingsContext';
 
 
 /** Interactive tooltip — hover / focus / touch */
@@ -272,18 +273,19 @@ function NeuralDecor() {
   );
 }
 
-function StageTimeline({ currentId, day }: { currentId: string; day: number }) {
+function StageTimeline({ currentId, day, stages }: { currentId: string; day: number; stages?: { id: string; label: string }[] }) {
+  const track = stages && stages.length ? stages : STAGE_RANGES;
   return (
     <div className="w-full">
       <div className="flex items-center gap-0.5">
-        {STAGE_RANGES.map((s, i) => {
+        {track.map((s, i) => {
           const active = s.id === currentId;
           const past = day >= s.end;
           return (
             <div key={s.id} className="flex-1 flex flex-col items-center relative">
               <div className={`text-base mb-0.5 ${active ? 'scale-125' : 'opacity-60'}`}>{s.emoji}</div>
               <div className={`w-full h-1.5 rounded-full ${past || active ? 'bg-fuchsia-500' : 'bg-[#1e2d40]'}`} />
-              {i < STAGE_RANGES.length - 1 && (
+              {i < track.length - 1 && (
                 <div className="absolute top-[22px] right-0 w-1/2 h-1.5 translate-x-1/2 pointer-events-none" />
               )}
               <div className={`text-[7px] mt-1 text-center leading-tight ${active ? 'text-fuchsia-300 font-bold' : 'text-slate-500'}`}>
@@ -421,14 +423,116 @@ const STAGE_DETAILS: StageDetail[] = [
   },
 ];
 
-export default function PredictionsPanel({ sim }: { sim: SimState }) {
+
+/** Phenology stages by primary crop (profile). Grapes use full STAGE_RANGES. */
+function stagesForCrop(cropId: string): { id: string; label: string; startDay: number; endDay: number }[] {
+  const id = (cropId || 'grape').toLowerCase();
+  if (id === 'grape' || /vine|raisin/.test(id)) {
+    return STAGE_RANGES.map((s) => ({
+      id: s.id,
+      label: s.label,
+      startDay: s.start ?? 0,
+      endDay: s.end ?? 150,
+    }));
+  }
+  // Generic agronomic tracks for other Maharashtra crops
+  const tracks: Record<string, { id: string; label: string; startDay: number; endDay: number }[]> = {
+    sugarcane: [
+      { id: 'germination', label: 'Germination', startDay: 1, endDay: 30 },
+      { id: 'vegetative', label: 'Tillering', startDay: 31, endDay: 100 },
+      { id: 'flowering', label: 'Grand growth', startDay: 101, endDay: 200 },
+      { id: 'fruit_set', label: 'Cane maturity', startDay: 201, endDay: 300 },
+      { id: 'ripening', label: 'Ripening', startDay: 301, endDay: 360 },
+      { id: 'harvest', label: 'Harvest', startDay: 361, endDay: 400 },
+    ],
+    cotton: [
+      { id: 'germination', label: 'Emergence', startDay: 1, endDay: 20 },
+      { id: 'vegetative', label: 'Square formation', startDay: 21, endDay: 55 },
+      { id: 'flowering', label: 'Flowering', startDay: 56, endDay: 90 },
+      { id: 'fruit_set', label: 'Boll development', startDay: 91, endDay: 130 },
+      { id: 'ripening', label: 'Boll opening', startDay: 131, endDay: 160 },
+      { id: 'harvest', label: 'Picking', startDay: 161, endDay: 180 },
+    ],
+    onion: [
+      { id: 'germination', label: 'Transplant establish', startDay: 1, endDay: 20 },
+      { id: 'vegetative', label: 'Leaf growth', startDay: 21, endDay: 55 },
+      { id: 'fruit_set', label: 'Bulb initiation', startDay: 56, endDay: 90 },
+      { id: 'ripening', label: 'Bulb swelling', startDay: 91, endDay: 120 },
+      { id: 'harvest', label: 'Harvest & curing', startDay: 121, endDay: 140 },
+    ],
+    soybean: [
+      { id: 'germination', label: 'Emergence', startDay: 1, endDay: 15 },
+      { id: 'vegetative', label: 'Vegetative', startDay: 16, endDay: 40 },
+      { id: 'flowering', label: 'Flowering', startDay: 41, endDay: 60 },
+      { id: 'fruit_set', label: 'Pod set', startDay: 61, endDay: 85 },
+      { id: 'ripening', label: 'Seed fill', startDay: 86, endDay: 110 },
+      { id: 'harvest', label: 'Maturity', startDay: 111, endDay: 125 },
+    ],
+  };
+  if (tracks[id]) return tracks[id];
+  // Default field crop track
+  return [
+    { id: 'germination', label: 'Establishment', startDay: 1, endDay: 20 },
+    { id: 'vegetative', label: 'Vegetative growth', startDay: 21, endDay: 55 },
+    { id: 'flowering', label: 'Reproductive', startDay: 56, endDay: 85 },
+    { id: 'fruit_set', label: 'Fruit / grain fill', startDay: 86, endDay: 115 },
+    { id: 'ripening', label: 'Ripening', startDay: 116, endDay: 140 },
+    { id: 'harvest', label: 'Harvest', startDay: 141, endDay: 160 },
+  ];
+}
+
+function mapSimStageToCropStage(
+  simStage: string,
+  cropStages: { id: string; label: string; startDay: number; endDay: number }[],
+  day: number,
+): { id: string; label: string; startDay: number; endDay: number } {
+  const byId = cropStages.find((s) => s.id === simStage);
+  if (byId) return byId;
+  const byDay = cropStages.find((s) => day >= s.startDay && day <= s.endDay);
+  return byDay || cropStages[Math.min(cropStages.length - 1, 1)];
+}
+
+export default function PredictionsPanel({
+  sim,
+  fieldVarietyMap,
+  selectedField: selectedFieldProp,
+  primaryCropId,
+  primaryCropLabel,
+}: {
+  sim: SimState;
+  fieldVarietyMap?: Record<string, GrapeVarietyId>;
+  selectedField?: string;
+  primaryCropId?: string;
+  primaryCropLabel?: string;
+}) {
   const [module, setModule] = useState<ModuleId>('yield');
   const [selectedGrowthStage, setSelectedGrowthStage] = useState<string | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string>('all');
   const farmCtx = useFarmOptional();
+  const settingsCtx = useSettingsOptional();
+  const cropId = primaryCropId || settingsCtx?.settings?.primaryCrop || 'grape';
+  const cropEntry = getCropCatalogEntry(cropId);
+  const cropLabel = primaryCropLabel || cropEntry.label;
+  const cropStages = useMemo(() => stagesForCrop(cropId), [cropId]);
+  const activeFieldId = selectedFieldProp || 'B';
+  const fieldVarietyId = fieldVarietyMap?.[activeFieldId] || 'thompson';
+  const fieldVariety = getGrapeVariety(fieldVarietyId);
+  const stageMetaCrop = useMemo(
+    () => mapSimStageToCropStage(sim.stage, cropStages, sim.day),
+    [sim.stage, sim.day, cropStages],
+  );
+  const nextStageCrop = useMemo(() => {
+    const idx = cropStages.findIndex((s) => s.id === stageMetaCrop.id);
+    return cropStages[Math.min(cropStages.length - 1, Math.max(0, idx) + 1)];
+  }, [cropStages, stageMetaCrop.id]);
+
   const evaluateReport = farmCtx?.evaluateReport ?? null;
   const evaluateError = farmCtx?.evaluateError ?? null;
   const evaluateLoading = farmCtx?.evaluateLoading ?? false;
+  const mlBundle = farmCtx?.ml;
+  const twinState = farmCtx?.twinState ?? null;
+  const twinError = farmCtx?.twinError ?? null;
+  const twinLoading = farmCtx?.twinLoading ?? false;
   const focus = evaluateReport?.focus_crop_assessment;
   const recs = evaluateReport?.primary_recommendations ?? [];
   const panel = 'bg-[#121a27] rounded-xl border border-[#1e2d40]';
@@ -546,8 +650,11 @@ export default function PredictionsPanel({ sim }: { sim: SimState }) {
     selectedFieldId === 'all' ? farmTotals.avgIrrig : activeFields[0]?.irrigMm ?? 12;
   const soilHealth =
     selectedFieldId === 'all' ? farmTotals.avgSoil : activeFields[0]?.soilIdx ?? 75;
-  const stageMeta = STAGE_RANGES.find((s) => s.id === sim.stage) || STAGE_RANGES[2];
-  const nextStage = STAGE_RANGES[Math.min(STAGE_RANGES.length - 1, STAGE_RANGES.findIndex((s) => s.id === sim.stage) + 1)];
+  const stageMeta = stageMetaCrop;
+  const nextStage = nextStageCrop;
+  // Prefer crop-track stages for timeline UI
+  const displayStages = cropStages;
+
   const daysToNext = Math.max(3, (nextStage?.start ?? sim.day + 12) - sim.day);
 
   const forecastPoints = useMemo(() => {
@@ -577,15 +684,34 @@ export default function PredictionsPanel({ sim }: { sim: SimState }) {
             </p>
           </div>
           {farmCtx && (
-            <button
-              type="button"
-              onClick={() => farmCtx.refreshEvaluate()}
-              disabled={evaluateLoading}
-              className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
-            >
-              <RefreshCw size={12} className={evaluateLoading ? 'animate-spin' : ''} />
-              Run suitability
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => farmCtx.refreshEvaluate()}
+                disabled={evaluateLoading}
+                className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={evaluateLoading ? 'animate-spin' : ''} />
+                Run suitability
+              </button>
+              <button
+                type="button"
+                onClick={() => void farmCtx.refreshMl()}
+                className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20"
+              >
+                <RefreshCw size={12} />
+                Refresh ML
+              </button>
+              <button
+                type="button"
+                onClick={() => void farmCtx.stepTwinFromLive()}
+                disabled={twinLoading}
+                className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={twinLoading ? 'animate-spin' : ''} />
+                Twin step
+              </button>
+            </div>
           )}
         </div>
 
@@ -819,6 +945,112 @@ export default function PredictionsPanel({ sim }: { sim: SimState }) {
               </div>
             </div>
           )}
+        </div>
+
+        {/* 06_ML models + digital twin (backend) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className={`${panel} p-3 border-cyan-500/20`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Brain size={14} className="text-cyan-300" />
+              <span className="text-[11px] font-bold text-cyan-200 uppercase tracking-wide">
+                06_ML models · Backend
+              </span>
+            </div>
+            {mlBundle?.error && (
+              <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2 py-1.5 mb-2">
+                {mlBundle.error}
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                <div className="text-[9px] text-slate-500">Yield model</div>
+                <div className={`text-[12px] font-semibold ${mlBundle?.status?.yield_model_loaded ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {mlBundle?.status?.yield_model_loaded ? 'Loaded' : '—'}
+                </div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                <div className="text-[9px] text-slate-500">Telemetry model</div>
+                <div className={`text-[12px] font-semibold ${mlBundle?.status?.telemetry_model_loaded ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {mlBundle?.status?.telemetry_model_loaded ? 'Loaded' : '—'}
+                </div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                <div className="text-[9px] text-slate-500">Predicted yield</div>
+                <div className="text-sm font-semibold text-cyan-300">
+                  {mlBundle?.yield?.predicted_yield_tons_ha != null
+                    ? `${Number(mlBundle.yield.predicted_yield_tons_ha).toFixed(2)} t/ha`
+                    : focus?.expected_yield_tons_ha != null
+                      ? `${Number(focus.expected_yield_tons_ha).toFixed(2)} t/ha`
+                      : '—'}
+                </div>
+              </div>
+              <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                <div className="text-[9px] text-slate-500">Hydrogel storage need</div>
+                <div className="text-sm font-semibold text-sky-300">
+                  {mlBundle?.telemetry?.predicted_required_hydrogel_storage_pct != null
+                    ? `${Number(mlBundle.telemetry.predicted_required_hydrogel_storage_pct).toFixed(1)}%`
+                    : '—'}
+                </div>
+              </div>
+            </div>
+            <p className="text-[9px] text-slate-500 leading-snug">
+              Artifacts from <span className="text-slate-400">06_ML/models</span> via POST /api/ml/yield and /api/ml/telemetry.
+            </p>
+          </div>
+
+          <div className={`${panel} p-3 border-emerald-500/20`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Activity size={14} className="text-emerald-300" />
+              <span className="text-[11px] font-bold text-emerald-200 uppercase tracking-wide">
+                Digital twin · 06_ML/simulation
+              </span>
+            </div>
+            {twinError && (
+              <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2 py-1.5 mb-2">
+                {twinError}
+              </div>
+            )}
+            {!twinState && !twinError && (
+              <div className="text-[11px] text-slate-400 mb-2">
+                No twin state yet — click <strong className="text-emerald-300">Twin step</strong> to run closed-loop physics.
+              </div>
+            )}
+            {twinState && (
+              <div className="grid grid-cols-2 gap-2 mb-2 text-[11px]">
+                <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                  <div className="text-[9px] text-slate-500">Growth stage</div>
+                  <div className="font-semibold text-white">{String(twinState.crop?.growth_stage ?? stageMeta.label)}</div>
+                </div>
+                <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                  <div className="text-[9px] text-slate-500">Soil moisture</div>
+                  <div className="font-semibold text-sky-300">
+                    {twinState.soil?.soil_moisture_pct != null
+                      ? `${Number(twinState.soil.soil_moisture_pct).toFixed(1)}%`
+                      : '—'}
+                  </div>
+                </div>
+                <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                  <div className="text-[9px] text-slate-500">Hydrogel storage</div>
+                  <div className="font-semibold text-cyan-300">
+                    {twinState.hydrogel?.hydrogel_water_storage_pct != null
+                      ? `${Number(twinState.hydrogel.hydrogel_water_storage_pct).toFixed(1)}%`
+                      : '—'}
+                  </div>
+                </div>
+                <div className="bg-[#0b131e] rounded-lg border border-[#1e2d40] p-2">
+                  <div className="text-[9px] text-slate-500">ML yield (twin)</div>
+                  <div className="font-semibold text-emerald-300">
+                    {twinState.predictions?.predicted_grape_yield_tons_ha != null
+                      ? `${Number(twinState.predictions.predicted_grape_yield_tons_ha).toFixed(2)} t/ha`
+                      : '—'}
+                  </div>
+                </div>
+              </div>
+            )}
+            <p className="text-[9px] text-slate-500 leading-snug">
+              Closed-loop engine + SQLite via GET /api/twin/state · POST /api/twin/step.
+            </p>
+          </div>
         </div>
 
         {/* Module selector + summary (simulation-assisted) */}
@@ -1226,21 +1458,23 @@ export default function PredictionsPanel({ sim }: { sim: SimState }) {
 
               {module === 'growth' && (
                 <div className="space-y-3">
-                  <StageTimeline currentId={sim.stage} day={sim.day} />
+                  <StageTimeline currentId={stageMeta.id} day={sim.day} stages={displayStages} />
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                    {STAGE_RANGES.map((s) => {
-                      const isCurrent = s.id === sim.stage;
-                      const isPast = sim.day >= s.end;
+                    {displayStages.map((s) => {
+                      const start = (s as { startDay?: number; start?: number }).startDay ?? (s as { start?: number }).start ?? 0;
+                      const end = (s as { endDay?: number; end?: number }).endDay ?? (s as { end?: number }).end ?? 150;
+                      const isCurrent = s.id === stageMeta.id || s.id === sim.stage;
+                      const isPast = sim.day >= end;
                       const isNext = nextStage?.id === s.id;
-                      const isSelected = (selectedGrowthStage ?? sim.stage) === s.id;
-                      const daysIn = Math.max(0, s.end - s.start);
+                      const isSelected = (selectedGrowthStage ?? stageMeta.id) === s.id;
+                      const daysIn = Math.max(0, end - start);
                       const progress = isCurrent
-                        ? Math.min(100, Math.round(((sim.day - s.start) / Math.max(1, daysIn)) * 100))
+                        ? Math.min(100, Math.round(((sim.day - start) / Math.max(1, daysIn)) * 100))
                         : isPast
                           ? 100
                           : 0;
-                      const eta = isPast ? 'Completed' : isCurrent ? `Day ${sim.day - s.start + 1}/${daysIn}` : isNext ? `In ${daysToNext}d` : `Day ${s.start}–${s.end}`;
+                      const eta = isPast ? 'Completed' : isCurrent ? `Day ${sim.day - start + 1}/${daysIn}` : isNext ? `In ${daysToNext}d` : `Day ${start}–${end}`;
                       return (
                         <button
                           type="button"
@@ -1413,6 +1647,8 @@ export default function PredictionsPanel({ sim }: { sim: SimState }) {
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-[11px]">
                     {[
+                      ['Crop', cropLabel],
+                      ['Field variety', cropId === 'grape' || /grape|vine/.test(cropId) ? fieldVariety.label : '—'],
                       ['Current Stage', stageMeta.label],
                       ['Next Stage', nextStage?.label || '—'],
                       ['Expected In', `${daysToNext} Days`],

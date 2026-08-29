@@ -99,11 +99,19 @@ export async function checkBackendHealth(): Promise<{
 }> {
   try {
     const payload = await apiGet<Record<string, unknown>>('/health');
-    return { ok: true, payload };
-  } catch (e) {
-    return {
-      ok: false,
-      error: e instanceof Error ? e.message : 'Health check failed',
-    };
+    return { ok: true, payload: payload || {} };
+  } catch (e1) {
+    // Fallback: root ping (some deploys only expose /)
+    try {
+      const root = await apiGet<Record<string, unknown>>('/');
+      const status = String((root as { status?: string })?.status || '');
+      if (status.toLowerCase().includes('running') || (root as { project?: string })?.project) {
+        return { ok: true, payload: root || {} };
+      }
+    } catch {
+      /* ignore */
+    }
+    const msg = e1 instanceof Error ? e1.message : String(e1);
+    return { ok: false, error: msg };
   }
 }

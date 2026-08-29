@@ -4,6 +4,7 @@ import {
   Sprout, CheckCircle2, Activity,
 } from 'lucide-react';
 import type { SimState } from './simulation';
+import { useFarmOptional } from './context/FarmContext';
 import { FIELDS } from './simulation';
 
 type ZoneRow = {
@@ -234,8 +235,15 @@ function MulchCrossSection({ moisture, coverage }: { moisture: number; coverage:
 }
 
 export default function MulchingPanel({ sim }: { sim: SimState }) {
+  const farmCtx = useFarmOptional();
+  const twinMulch = farmCtx?.twinState?.mulch;
+  const backendDeg = twinMulch?.mulch_degradation_pct;
+  const backendCool = twinMulch?.effective_mulch_cooling_c;
+
   const [selectedZone, setSelectedZone] = useState(FIELDS[0]?.id || 'A');
   const zones = useMemo(() => buildZones(sim), [sim]);
+  const liveDeg = backendDeg != null ? Number(backendDeg) : null;
+  const liveCool = backendCool != null ? Number(backendCool) : null;
   const active = zones.find((z) => z.id === selectedZone) || zones[0];
   const fieldMeta = FIELDS.find((f) => f.id === selectedZone) || FIELDS[0];
 
@@ -299,6 +307,22 @@ export default function MulchingPanel({ sim }: { sim: SimState }) {
               Intelligent Coverage · Soil Protection · Moisture Optimization ·{' '}
               <span className="text-violet-300 font-semibold">{active.name}</span>
             </p>
+            {(liveDeg != null || liveCool != null) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-amber-100/90">
+                <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-semibold text-amber-200">
+                  Backend twin
+                </span>
+                {liveDeg != null && <span>Degradation <strong>{liveDeg.toFixed(0)}%</strong></span>}
+                {liveCool != null && <span>Cooling <strong>{liveCool.toFixed(1)}°C</strong></span>}
+                <button
+                  type="button"
+                  className="underline text-amber-300 hover:text-amber-100"
+                  onClick={() => void farmCtx?.stepTwinFromLive?.()}
+                >
+                  Step twin → apollo_twin.db
+                </button>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-1">
             {zones.map((z) => (

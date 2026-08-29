@@ -9,15 +9,26 @@
   --border: #1e2d40;
   --accent: #10b981;
   --text: #e2e8f0;
+  --app-bg: #080d14;
+  --app-panel: #0c121c;
+  --app-border: #1e2d40;
 }
 
 html, body, #root {
   margin: 0;
   height: 100%;
-  background: var(--bg);
+  background: var(--app-bg, var(--bg));
   color: var(--text);
   font-family: Inter, system-ui, -apple-system, sans-serif;
   overflow: hidden;
+}
+
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }
 
 * { box-sizing: border-box; }

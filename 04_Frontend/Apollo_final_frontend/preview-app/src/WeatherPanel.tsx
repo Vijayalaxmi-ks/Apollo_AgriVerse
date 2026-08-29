@@ -786,10 +786,101 @@ export type LiveWeatherSummary = {
 
 export default function WeatherPanel({
   onLiveWeather,
+  preferredCity,
+  preferredLat,
+  preferredLon,
 }: {
   onLiveWeather?: (summary: LiveWeatherSummary) => void;
+  preferredCity?: string;
+  preferredLat?: number;
+  preferredLon?: number;
 } = {}) {
-  const [selected, setSelected] = useState<CityOption>(POPULAR_CITIES[0]);
+  const resolveCity = (): CityOption | null => {
+    const name = preferredCity?.trim();
+    if (!name) return null;
+    // Match popular list only when coords not provided
+    const hit = POPULAR_CITIES.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    if (hit) {
+      // Prefer farmer-entered coords when available
+      if (
+        preferredLat != null &&
+        preferredLon != null &&
+        Number.isFinite(preferredLat) &&
+        Number.isFinite(preferredLon)
+      ) {
+        return { ...hit, lat: preferredLat, lon: preferredLon };
+      }
+      return hit;
+    }
+    // Custom city — require coords from Settings; do NOT default to Solapur
+    if (
+      preferredLat != null &&
+      preferredLon != null &&
+      Number.isFinite(preferredLat) &&
+      Number.isFinite(preferredLon)
+    ) {
+      return { name, lat: preferredLat, lon: preferredLon, state: '' };
+    }
+    // Name only — still select by name; geocode path may refine later
+    return { name, lat: preferredLat || 0, lon: preferredLon || 0, state: '' };
+  };
+
+  const [selected, setSelected] = useState<CityOption | null>(() => resolveCity());
+  const [profileHint, setProfileHint] = useState<string | null>(null);
+
+  // Always follow Settings / farm profile city + coordinates
+  useEffect(() => {
+    let cancelled = false;
+    const next = resolveCity();
+    if (!next) {
+      setProfileHint('Set City + coordinates in Settings → Save to load live weather for your farm.');
+      setSelected(null);
+      return;
+    }
+    setProfileHint(null);
+
+    const apply = (city: CityOption) => {
+      if (cancelled) return;
+      setSelected((prev) => {
+        if (
+          prev &&
+          prev.name.toLowerCase() === city.name.toLowerCase() &&
+          Math.abs(prev.lat - city.lat) < 1e-6 &&
+          Math.abs(prev.lon - city.lon) < 1e-6
+        ) {
+          return prev;
+        }
+        return city;
+      });
+    };
+
+    apply(next);
+
+    // If Settings only has a city name (or 0,0 coords), geocode so weather is not stuck on Solapur
+    const needsGeo = !next.lat || !next.lon;
+    if (needsGeo && next.name) {
+      void (async () => {
+        try {
+          const geo = await geocodeCity(next.name);
+          if (geo && !cancelled) {
+            apply({
+              name: geo.name || next.name,
+              state: geo.state || next.state || '',
+              lat: geo.lat,
+              lon: geo.lon,
+            });
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferredCity, preferredLat, preferredLon]);
   const [weather, setWeather] = useState<WeatherResponse | null>(null);
   const [hourly, setHourly] = useState<HourlyPoint[]>([]);
   const [forecast, setForecast] = useState<ForecastDay[]>([]);
@@ -886,6 +977,12 @@ export default function WeatherPanel({
   }, []);
 
   useEffect(() => {
+    if (!selected || !selected.name) return;
+    // Skip fetch until we have usable coordinates
+    if (!selected.lat && !selected.lon) {
+      setProfileHint('City set but coordinates missing — enter lat/lon in Settings and Save.');
+      return;
+    }
     loadAll(selected);
     const id = setInterval(() => loadAll(selected), 10 * 60 * 1000);
     return () => clearInterval(id);
@@ -909,6 +1006,8 @@ export default function WeatherPanel({
         day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
       }) + ' IST'
     : '—';
+  /** Active profile city (null until Settings has city + coords) */
+  const city = selected;
 
   const paramsTable = useMemo(() => {
     if (!w) return [];
@@ -986,8 +1085,27 @@ export default function WeatherPanel({
           </button>
         </div>
         <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+          {/* Profile city first when not already in the quick list */}
+          {city &&
+            !POPULAR_CITIES.some((c) => c.name.toLowerCase() === city.name.toLowerCase()) && (
+              <button
+                type="button"
+                onClick={() => setSelected(city)}
+                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition bg-emerald-900/25 border border-emerald-500/40 mb-1"
+              >
+                <MapPin size={14} className="text-emerald-400" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-medium truncate text-emerald-300">
+                    {city.name}{city.state ? `, ${city.state}` : ''} · Profile
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    {city.lat.toFixed(2)}° N, {city.lon.toFixed(2)}° E
+                  </div>
+                </div>
+              </button>
+            )}
           {POPULAR_CITIES.map((c) => {
-            const on = selected.name === c.name;
+            const on = Boolean(city && city.name.toLowerCase() === c.name.toLowerCase());
             const t = cityTemps[c.name];
             return (
               <button
@@ -1023,9 +1141,9 @@ export default function WeatherPanel({
         </div>
         <div className="flex items-center gap-2 text-[12px] text-slate-300 mb-1">
           <MapPin size={14} className="text-emerald-400" />
-          {selected.name}, {selected.state || 'India'}
+          {(city || selected)?.name || '—'}, {(city || selected)?.state || 'India'}
         </div>
-        <div className="text-[10px] text-slate-500 mb-4">{selected.lat.toFixed(2)}° N, {selected.lon.toFixed(2)}° E</div>
+        <div className="text-[10px] text-slate-500 mb-4">{((city || selected)?.lat ?? 0).toFixed(2)}° N, {((city || selected)?.lon ?? 0).toFixed(2)}° E</div>
         <div className="flex items-center gap-4 mb-4">
           <WeatherIcon type={w ? iconForCondition(w.condition || '') : 'partly'} size={42} />
           <div>
@@ -1088,6 +1206,25 @@ export default function WeatherPanel({
       </div>
     </div>
   );
+
+  if (!city) {
+    return (
+      <div className="flex-1 overflow-y-auto p-6 bg-[#0b131e] flex items-center justify-center">
+        <div className="max-w-md w-full rounded-2xl border border-sky-500/25 bg-[#0c121c] p-6 text-center space-y-3">
+          <div className="text-3xl">📍</div>
+          <h2 className="text-lg font-bold text-white">No farm city yet</h2>
+          <p className="text-[12px] text-slate-400 leading-relaxed">
+            Live weather follows the city you enter when creating / editing your farm profile.
+          </p>
+          <p className="text-[12px] text-sky-300/90">
+            Open <strong className="text-white">Settings</strong> → enter <strong className="text-white">City</strong>,
+            latitude &amp; longitude → <strong className="text-white">Save &amp; refresh APIs</strong>.
+          </p>
+          {profileHint && <p className="text-[11px] text-slate-500">{profileHint}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-[#0b131e] overflow-hidden">
@@ -1168,7 +1305,7 @@ export default function WeatherPanel({
                 <div>
                   <h2 className="text-base font-bold text-white">DETAILED AGRO ADVISORY</h2>
                   <div className="text-[11px] text-slate-400 mt-0.5">
-                    {selected.name}, {selected.state || 'India'} · Based on live hybrid weather (Open-Meteo / NASA POWER)
+                    {(city || selected)?.name || '—'}, {(city || selected)?.state || 'India'} · Based on live hybrid weather (Open-Meteo / NASA POWER)
                   </div>
                 </div>
                 <span className="text-[11px] text-slate-500">Updated: {updatedStr}</span>

@@ -8,8 +8,10 @@ import {
 import type { SimState } from './simulation';
 import { FIELDS } from './simulation';
 import { useFarmOptional } from './context/FarmContext';
+import { useSettingsOptional } from './context/SettingsContext';
 import type { EvaluateReport } from './api/evaluate';
 import type { LiveWeatherSummary } from './api/weather';
+import type { AppSettings } from './context/SettingsContext';
 
 type Severity = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
@@ -104,12 +106,28 @@ function mapSimSeverity(s: string): Severity {
 /** Always produce a full farm + per-field alert feed (never empty under normal filters). */
 function buildRichAlerts(
   sim: SimState,
-  opts?: { liveWeather?: LiveWeatherSummary | null; evaluateReport?: EvaluateReport | null },
+  opts?: {
+    liveWeather?: LiveWeatherSummary | null;
+    evaluateReport?: EvaluateReport | null;
+    twinState?: any;
+    mlTelemetry?: any;
+    thresholds?: Pick<
+      AppSettings,
+      'heatAlertC' | 'humidityAlert' | 'moistureMin' | 'moistureMax' | 'diseaseThreshold' | 'notifyCritical' | 'notifyWeather' | 'notifyIrrigation'
+    >;
+  },
 ): AlertItem[] {
   const items: AlertItem[] = [];
   const env = sim.env;
   const wx = opts?.liveWeather;
   const report = opts?.evaluateReport;
+  const twin = opts?.twinState;
+  const mlTel = opts?.mlTelemetry;
+  const th = opts?.thresholds;
+  const heatT = th?.heatAlertC ?? 34;
+  const humT = th?.humidityAlert ?? 80;
+  const moistMin = th?.moistureMin ?? 48;
+  const moistMax = th?.moistureMax ?? 75;
   const temp = wx?.temperature ?? env.temperature;
   const humidity = wx?.humidity ?? env.humidity;
   const rainfall = wx?.rainfall ?? env.rainfall;
@@ -181,13 +199,13 @@ function buildRichAlerts(
     });
   }
 
-  // ── Farm-wide weather (prefer live backend values) ──
-  if (temp >= 34) {
+  // ── Farm-wide weather (prefer live backend values; thresholds from Settings) ──
+  if (temp >= heatT) {
     items.push({
       id: id(),
-      severity: temp >= 38 ? 'critical' : 'high',
+      severity: temp >= heatT + 4 ? 'critical' : 'high',
       title: 'Heat stress threshold exceeded',
-      detail: `Air temperature ${temp}°C is above the safe canopy band (24–32°C). Berry scorch and stomatal closure risk are elevated on west-facing rows.`,
+      detail: `Air temperature ${temp}°C is above the alert threshold (${heatT}°C). Berry scorch and stomatal closure risk are elevated on west-facing rows.`,
       field: 'Farm-wide',
       category: 'weather',
       age: 'Just now',
@@ -195,12 +213,12 @@ function buildRichAlerts(
       action: 'Deploy shade net · increase afternoon drip pulse on Fields A & C',
       source: wxSource,
     });
-  } else if (temp >= 31) {
+  } else if (temp >= heatT - 3) {
     items.push({
       id: id(),
       severity: 'medium',
       title: 'Warm conditions — watch heat buildup',
-      detail: `Temperature ${temp}°C is approaching the upper comfort band. Peak afternoon hours may still stress fruiting vines.`,
+      detail: `Temperature ${temp}°C is approaching the heat alert (${heatT}°C). Peak afternoon hours may still stress fruiting vines.`,
       field: 'Farm-wide',
       category: 'weather',
       age: '4 min ago',
@@ -223,7 +241,7 @@ function buildRichAlerts(
     });
   }
 
-  if (env.humidity >= 80) {
+  if (env.humidity >= humT) {
     items.push({
       id: id(),
       severity: 'high',
@@ -334,7 +352,7 @@ function buildRichAlerts(
   }
 
   // ── Farm soil / nutrients / hydrogel ──
-  if (env.soilMoisture < 48) {
+  if (env.soilMoisture < moistMin) {
     items.push({
       id: id(),
       severity: env.soilMoisture < 40 ? 'critical' : 'high',
@@ -347,7 +365,7 @@ function buildRichAlerts(
       action: 'Priority irrigation across all fields',
       source: 'Soil network',
     });
-  } else if (env.soilMoisture > 78) {
+  } else if (env.soilMoisture > moistMax) {
     items.push({
       id: id(),
       severity: 'medium',
@@ -492,7 +510,7 @@ function buildRichAlerts(
         action: 'Start drip cycle now · verify emitters',
         source: 'Field sensors',
       });
-    } else if (f.soilMoisture > 75) {
+    } else if (f.soilMoisture > moistMax) {
       items.push({
         id: id(),
         severity: 'medium',
@@ -615,6 +633,84 @@ function buildRichAlerts(
     });
   }
 
+
+  // Backend twin + ML hydrogel / mulch intelligence
+  const gelStorage =
+    twin?.hydrogel?.hydrogel_water_storage_pct ??
+    mlTel?.predicted_required_hydrogel_storage_pct ??
+    env.hydrogelSat;
+  const gelRelease = twin?.hydrogel?.hydrogel_release_rate_lhr;
+  const mulchDeg = twin?.mulch?.mulch_degradation_pct ?? (100 - (sim.mulchCoverage || 85));
+  const mulchCool = twin?.mulch?.effective_mulch_cooling_c;
+  const soilMoistTwin = twin?.soil?.soil_moisture_pct ?? env.soilMoisture;
+
+  if (typeof gelStorage === 'number') {
+    if (gelStorage < 20) {
+      items.push({
+        id: id(),
+        severity: gelStorage < 12 ? 'critical' : 'high',
+        title: `Hydrogel storage low — ${gelStorage.toFixed(0)}%`,
+        detail: gelRelease
+          ? `Twin hydrogel release ${Number(gelRelease).toFixed(2)} L/hr. Refill / recharge polymers before next heat pulse.`
+          : `Required storage from telemetry model is critically low. Align drip cycles with hydrogel recharge.`,
+        field: 'Farm-wide',
+        category: 'irrigation',
+        age: 'Just now',
+        metric: `${Number(gelStorage).toFixed(0)}%`,
+        action: 'Open Intelligent Hydrogels · schedule recharge',
+        source: twin ? 'Digital Twin /api/twin/state' : 'ML /api/ml/telemetry',
+      });
+    } else if (gelStorage < 35) {
+      items.push({
+        id: id(),
+        severity: 'medium',
+        title: `Hydrogel buffer ${gelStorage.toFixed(0)}%`,
+        detail: 'Polymer water reserve is thinning. Monitor soil moisture against stage thresholds.',
+        field: 'Farm-wide',
+        category: 'irrigation',
+        age: '4 min ago',
+        metric: `${Number(gelStorage).toFixed(0)}%`,
+        action: 'Review hydrogel formula & saturation map',
+        source: twin ? 'Digital Twin' : 'ML telemetry',
+      });
+    }
+  }
+
+  if (typeof mulchDeg === 'number' && mulchDeg >= 55) {
+    items.push({
+      id: id(),
+      severity: mulchDeg >= 70 ? 'high' : 'medium',
+      title: `Mulch degradation ${mulchDeg.toFixed(0)}%`,
+      detail: mulchCool != null
+        ? `Effective cooling ${Number(mulchCool).toFixed(1)}°C. Replace or reinforce sheet before peak heat.`
+        : 'Sensor film wear elevated — soil surface temperature suppression is declining.',
+      field: 'Farm-wide',
+      category: 'soil',
+      age: '6 min ago',
+      metric: `${Number(mulchDeg).toFixed(0)}%`,
+      action: 'Open Smart Mulching · plan replacement',
+      source: twin ? 'Digital Twin mulch model' : 'Simulation mulch coverage',
+    });
+  }
+
+  if (twin?.intelligence?.soil_health_index) {
+    const shi = String(twin.intelligence.soil_health_index);
+    if (/poor|critical|low/i.test(shi)) {
+      items.push({
+        id: id(),
+        severity: 'high',
+        title: `Soil health index — ${shi}`,
+        detail: `Twin substrate intelligence reports ${shi}. Moisture twin ${Number(soilMoistTwin).toFixed(0)}%.`,
+        field: 'Farm-wide',
+        category: 'soil',
+        age: '2 min ago',
+        metric: shi,
+        action: 'Review Soil panel & fertigation plan',
+        source: 'Substrate intelligence',
+      });
+    }
+  }
+
   items.push({
     id: id(),
     severity: 'info',
@@ -641,11 +737,27 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
   const [acked, setAcked] = useState<Set<string>>(new Set());
 
   const farmCtx = useFarmOptional();
+  const settingsCtx = useSettingsOptional();
+  const thresholds = settingsCtx?.settings;
   const allAlerts = useMemo(
     () =>
       buildRichAlerts(sim, {
         liveWeather: farmCtx?.liveWeather,
         evaluateReport: farmCtx?.evaluateReport,
+        twinState: farmCtx?.twinState,
+        mlTelemetry: farmCtx?.ml?.telemetry,
+        thresholds: thresholds
+          ? {
+              heatAlertC: thresholds.heatAlertC,
+              humidityAlert: thresholds.humidityAlert,
+              moistureMin: thresholds.moistureMin,
+              moistureMax: thresholds.moistureMax,
+              diseaseThreshold: thresholds.diseaseThreshold,
+              notifyCritical: thresholds.notifyCritical,
+              notifyWeather: thresholds.notifyWeather,
+              notifyIrrigation: thresholds.notifyIrrigation,
+            }
+          : undefined,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -666,6 +778,13 @@ export default function AlertsPanel({ sim }: { sim: SimState }) {
       sim.stageProgress,
       farmCtx?.liveWeather,
       farmCtx?.evaluateReport,
+      farmCtx?.twinState,
+      farmCtx?.ml?.telemetry,
+      thresholds?.heatAlertC,
+      thresholds?.humidityAlert,
+      thresholds?.moistureMin,
+      thresholds?.moistureMax,
+      thresholds?.diseaseThreshold,
     ],
   );
 

@@ -16,14 +16,17 @@ import PredictionsPanel from './PredictionsPanel';
 import AlertsPanel from './AlertsPanel';
 import ReportsPanel from './ReportsPanel';
 import SettingsPanel from './SettingsPanel';
-import type { SimState, TwinLevel } from './simulation';
+import type { SimState, TwinLevel, FieldInfo, SoilClassId, GrapeVarietyId } from './simulation';
 import {
-  createInitialState, FIELDS, stepSimulation
+  createInitialState, FIELDS, stepSimulation, getGrapeVariety, getSoilClass,
+  buildDynamicFields, getCropCatalogEntry,
 } from './simulation';
 import { useFarm } from './context/FarmContext';
+import { useSettings } from './context/SettingsContext';
 import type { LiveWeatherSummary } from './api/weather';
 
 const SIDEBAR = [
+  { id: 'settings', icon: Settings, label: 'Settings', sub: 'System Config' },
   { id: 'twin', icon: Home, label: 'Digital Twin', sub: 'Farm Overview' },
   { id: 'weather', icon: CloudRain, label: 'Weather Intelligence', sub: 'Live Weather Data' },
   { id: 'soil', icon: Layers, label: 'Intelligent Soil', sub: 'NPK & Moisture' },
@@ -35,7 +38,6 @@ const SIDEBAR = [
   { id: 'analytics', icon: BarChart2, label: 'Analytics', sub: 'Farm Data' },
   { id: 'alerts', icon: AlertTriangle, label: 'Alerts', sub: 'Active Warnings' },
   { id: 'reports', icon: FileText, label: 'Reports', sub: 'Generated Logs' },
-  { id: 'settings', icon: Settings, label: 'Settings', sub: 'System Config' },
 ];
 
 /** 7-day rain bars derived from current rainfall (not a fixed mock table) */
@@ -78,14 +80,35 @@ function RightColumn({
   selectedField,
   level,
   liveWeather,
+  fieldSoilMap,
+  fieldVarietyMap,
+  settingsUnits,
+  waterAvailability,
+  fieldsList = FIELDS,
+  farmCity,
+  primaryCropLabel,
 }: {
   sim: SimState;
   selectedField: string;
   level: TwinLevel;
   liveWeather: LiveWeatherSummary | null;
+  fieldSoilMap: Record<string, import('./simulation').SoilClassId>;
+  fieldVarietyMap: Record<string, import('./simulation').GrapeVarietyId>;
+  settingsUnits: 'metric' | 'imperial';
+  waterAvailability: string;
+  fieldsList?: FieldInfo[];
+  farmCity?: string;
+  primaryCropLabel?: string;
 }) {
-  const field = FIELDS.find((f) => f.id === selectedField) || FIELDS[1];
+  const field = fieldsList.find((f) => f.id === selectedField) || fieldsList[0] || FIELDS[0];
   const showField = level !== 'farm';
+  const varietyId = fieldVarietyMap[selectedField] || 'thompson';
+  const soilId = fieldSoilMap[selectedField] || 'alluvial';
+  const variety = getGrapeVariety(varietyId);
+  const soil = getSoilClass(soilId);
+  const tempUnit = settingsUnits === 'imperial' ? '°F' : '°C';
+  const toTemp = (c: number) =>
+    settingsUnits === 'imperial' ? Math.round((c * 9) / 5 + 32) : Math.round(c);
   // Prefer live Weather Intelligence data for summary
   const wxTemp = liveWeather?.temperature ?? sim.env.temperature;
   const wxHum = liveWeather?.humidity ?? sim.env.humidity;
@@ -116,31 +139,33 @@ function RightColumn({
                 ['Field', field.name],
                 ['Area', `${field.acres} Acres`],
                 ['Plant Population', field.plants.toLocaleString()],
-                ['Grape Variety', field.variety],
+                ['Grape Variety', variety.label],
                 ['Row Spacing', field.rowSpacing],
                 ['Plant Spacing', field.plantSpacing],
-                ['Soil Type', field.soilType],
+                ['Soil Type', soil.label],
                 ['Soil Moisture', `${field.soilMoisture}%`],
                 ['Health Index', `${field.health}%`],
                 ['Last Irrigation', field.lastIrrigation],
-                ['Est. Yield', `${field.yieldEst} t/ac`],
+                ['Est. Yield', `${variety.baseYieldTPerAc.toFixed(1)} t/ac`],
                 ['Next Irrigation', sim.irrigationNeed ? 'Required' : 'Not Required'],
               ]
             : [
-                ['Total Area', '9.50 Acres'],
-                ['Total Plants', '4,320'],
-                ['Active Fields', '4'],
-                ['Grape Variety', 'Thompson Seedless'],
+                ['Location', farmCity || liveWeather?.city || '—'],
+                ['Primary crop', primaryCropLabel || variety.label],
+                ['Total Area', `${fieldsList.reduce((s, f) => s + f.acres, 0).toFixed(2)} Acres`],
+                ['Total Plants', fieldsList.reduce((s, f) => s + f.plants, 0).toLocaleString()],
+                ['Active Fields', String(fieldsList.length)],
+                ['Grape Variety', variety.label],
                 ['Average Soil Moisture', `${sim.env.soilMoisture.toFixed(0)}%`],
                 ['Crop Health Index', `${sim.healthIndex}%`],
-                ['Water Availability', 'Good'],
+                ['Water Availability', waterAvailability],
                 ['Next Irrigation', sim.irrigationNeed ? 'Required' : 'Not Required'],
-                ['Rainfall Forecast (3 Days)', '18 mm'],
+                ['Rainfall (live)', `${wxRain.toFixed(1)} mm`],
               ]
           ).map(([l, v]) => (
             <div key={l} className="flex justify-between border-b border-[#1e2d40] pb-1.5">
               <span className="text-slate-400">{l}</span>
-              <span className={String(v) === 'Good' || String(v) === 'Not Required' ? 'text-emerald-400 font-medium' : String(v) === 'Required' ? 'text-amber-400' : 'text-white'}>{v}</span>
+              <span className={String(v) === 'Good' || String(v) === 'Not Required' || String(v) === 'high' ? 'text-emerald-400 font-medium' : String(v) === 'Required' || String(v) === 'low' ? 'text-amber-400' : 'text-white'}>{v}</span>
             </div>
           ))}
         </div>
@@ -174,13 +199,13 @@ function RightColumn({
               <Sun size={32} className="text-amber-400" />
             )}
             <div>
-              <div className="text-2xl font-light text-white">{wxTemp}°C</div>
+              <div className="text-2xl font-light text-white">{toTemp(wxTemp)}{tempUnit}</div>
               <div className="text-[10px] text-slate-400 capitalize">{wxCondition}</div>
             </div>
           </div>
           <div className="text-[10px] text-slate-400 text-right space-y-0.5">
-            <div>Min <strong className="text-white">{wxMin}°C</strong></div>
-            <div>Max <strong className="text-white">{wxMax}°C</strong></div>
+            <div>Min <strong className="text-white">{toTemp(wxMin)}{tempUnit}</strong></div>
+            <div>Max <strong className="text-white">{toTemp(wxMax)}{tempUnit}</strong></div>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-1.5 mb-3">
@@ -281,64 +306,159 @@ export default function App() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [showRight, setShowRight] = useState(true);
   const [sim, setSim] = useState<SimState>(() => createInitialState(0));
-  const [isPlaying, setIsPlaying] = useState(false);
+  const { settings } = useSettings();
+  const [isPlaying, setIsPlaying] = useState(() => {
+    try {
+      const raw = localStorage.getItem('agriverse-settings-v2') || localStorage.getItem('agriverse-settings-v1');
+      if (raw) return Boolean(JSON.parse(raw).autoPlay);
+    } catch { /* ignore */ }
+    return false;
+  });
   const [level, setLevel] = useState<TwinLevel>('farm');
   const [selectedField, setSelectedField] = useState('B');
   const [mode, setMode] = useState<'auto' | 'manual'>('auto');
-  const [fieldSoilMap, setFieldSoilMap] = useState<Record<string, import('./simulation').SoilClassId>>({
-    A: 'red',
-    B: 'black',
-    C: 'alluvial',
-    D: 'lateritic',
+  const FIELD_SOIL_KEY = 'agriverse-field-soil-v1';
+  const FIELD_VAR_KEY = 'agriverse-field-variety-v1';
+  const [fieldSoilMap, setFieldSoilMap] = useState<Record<string, import('./simulation').SoilClassId>>(() => {
+    try {
+      const raw = localStorage.getItem(FIELD_SOIL_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return { A: 'red', B: 'black', C: 'alluvial', D: 'lateritic' };
   });
   const setFieldSoil = useCallback((fieldId: string, soilId: import('./simulation').SoilClassId) => {
-    setFieldSoilMap((prev) => ({ ...prev, [fieldId]: soilId }));
+    setFieldSoilMap((prev) => {
+      const next = { ...prev, [fieldId]: soilId };
+      try { localStorage.setItem(FIELD_SOIL_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
   }, []);
-  const [fieldVarietyMap, setFieldVarietyMap] = useState<Record<string, import('./simulation').GrapeVarietyId>>({
-    A: 'sharad',
-    B: 'tas_a_ganesh',
-    C: 'thompson',
-    D: 'manjari_naveen',
+  const [fieldVarietyMap, setFieldVarietyMap] = useState<Record<string, import('./simulation').GrapeVarietyId>>(() => {
+    try {
+      const raw = localStorage.getItem(FIELD_VAR_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { /* ignore */ }
+    return { A: 'sharad', B: 'tas_a_ganesh', C: 'thompson', D: 'manjari_naveen' };
   });
   const setFieldVariety = useCallback((fieldId: string, varietyId: import('./simulation').GrapeVarietyId) => {
-    setFieldVarietyMap((prev) => ({ ...prev, [fieldId]: varietyId }));
+    setFieldVarietyMap((prev) => {
+      const next = { ...prev, [fieldId]: varietyId };
+      try { localStorage.setItem(FIELD_VAR_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
   }, []);
-  const activeFieldSoil = fieldSoilMap[selectedField] || 'alluvial';
+
+  // Persist maps when rebuilt from field-count changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(FIELD_SOIL_KEY, JSON.stringify(fieldSoilMap));
+      localStorage.setItem(FIELD_VAR_KEY, JSON.stringify(fieldVarietyMap));
+    } catch { /* ignore */ }
+  }, [fieldSoilMap, fieldVarietyMap]);
+
+  // Dynamic field parcels from farmer field-count + default soil
+  const dynamicFields: FieldInfo[] = useMemo(() => {
+    const n = settings.fieldCount || 4;
+    const soil = getSoilClass(settings.defaultSoilClass || 'alluvial');
+    const crop = getCropCatalogEntry(settings.primaryCrop || 'grape');
+    const varietyLabel = crop.twinGrapeVisual ? 'Thompson Seedless' : crop.label;
+    return buildDynamicFields(n, { soilLabel: soil.shortLabel, varietyLabel });
+  }, [settings.fieldCount, settings.defaultSoilClass, settings.primaryCrop]);
+
+  // Keep soil/variety maps aligned with field count
+  useEffect(() => {
+    const ids = dynamicFields.map((f) => f.id);
+    const soils: SoilClassId[] = ['red', 'black', 'alluvial', 'lateritic', 'alkaline'];
+    const varieties: GrapeVarietyId[] = ['sharad', 'tas_a_ganesh', 'thompson', 'manjari_naveen', 'manjari_shyama'];
+    setFieldSoilMap((prev) => {
+      const next = { ...prev };
+      ids.forEach((id, i) => {
+        if (!next[id]) next[id] = (settings.defaultSoilClass as SoilClassId) || soils[i % soils.length];
+      });
+      Object.keys(next).forEach((k) => {
+        if (!ids.includes(k)) delete next[k];
+      });
+      return next;
+    });
+    setFieldVarietyMap((prev) => {
+      const next = { ...prev };
+      ids.forEach((id, i) => {
+        if (!next[id]) next[id] = varieties[i % varieties.length];
+      });
+      Object.keys(next).forEach((k) => {
+        if (!ids.includes(k)) delete next[k];
+      });
+      return next;
+    });
+    if (!ids.includes(selectedField)) {
+      setSelectedField(ids[0] || 'A');
+    }
+  }, [dynamicFields, settings.defaultSoilClass, selectedField]);
+
+  const activeFieldSoil = fieldSoilMap[selectedField] || (settings.defaultSoilClass as SoilClassId) || 'alluvial';
+  const primaryCrop = getCropCatalogEntry(settings.primaryCrop || 'grape');
+
+  // Keep sim autoplay in sync with Settings
+  useEffect(() => {
+    setIsPlaying(Boolean(settings.autoPlay));
+  }, [settings.autoPlay]);
+
+  useEffect(() => {
+    const onSaved = () => {
+      // Field maps already rebuild via dynamicFields effect; nudge weather into sim.env
+      // via live weather when FarmContext refreshes
+    };
+    window.addEventListener('agriverse-settings-saved', onSaved);
+    return () => window.removeEventListener('agriverse-settings-saved', onSaved);
+  }, []);
+
+
   const { liveWeather, pushLiveWeather, apiStatus, evaluateReport } = useFarm();
   const [showNotif, setShowNotif] = useState(false);
 
-  /** Overall farm notifications for the header bell */
+  /** Overall farm notifications for the header bell — thresholds from Settings */
   const farmNotifications = useMemo(() => {
     type N = { id: string; severity: 'critical' | 'high' | 'medium' | 'low' | 'info'; title: string; field: string; age: string; detail?: string };
     const list: N[] = [];
     const env = sim.env;
     let i = 0;
     const push = (n: Omit<N, 'id'>) => list.push({ ...n, id: `fn-${++i}` });
+    const heatT = settings.heatAlertC;
+    const humT = settings.humidityAlert;
+    const moistMin = settings.moistureMin;
 
-    if (env.temperature >= 34) {
-      push({ severity: env.temperature >= 38 ? 'critical' : 'high', title: `Heat stress — ${env.temperature}°C`, field: 'Farm-wide', age: 'Just now', detail: 'Above safe canopy band' });
-    } else if (env.temperature >= 31) {
-      push({ severity: 'medium', title: `Warm conditions — ${env.temperature}°C`, field: 'Farm-wide', age: '4 min ago' });
-    } else {
-      push({ severity: 'info', title: `Temp optimal — ${env.temperature}°C`, field: 'Farm-wide', age: '2 min ago' });
+    if (settings.notifyCritical || settings.notifyWeather) {
+      if (env.temperature >= heatT) {
+        push({ severity: env.temperature >= heatT + 4 ? 'critical' : 'high', title: `Heat stress — ${env.temperature}°C`, field: 'Farm-wide', age: 'Just now', detail: `Above alert threshold ${heatT}°C` });
+      } else if (env.temperature >= heatT - 3) {
+        push({ severity: 'medium', title: `Warm conditions — ${env.temperature}°C`, field: 'Farm-wide', age: '4 min ago' });
+      } else {
+        push({ severity: 'info', title: `Temp optimal — ${env.temperature}°C`, field: 'Farm-wide', age: '2 min ago' });
+      }
     }
 
-    if (env.humidity >= 80) {
-      push({ severity: 'high', title: `High humidity ${env.humidity}% — disease window`, field: 'Farm-wide', age: '8 min ago' });
-    } else if (env.humidity >= 70) {
-      push({ severity: 'medium', title: `Elevated humidity ${env.humidity}%`, field: 'Farm-wide', age: '11 min ago' });
+    if (settings.notifyWeather) {
+      if (env.humidity >= humT) {
+        push({ severity: 'high', title: `High humidity ${env.humidity}% — disease window`, field: 'Farm-wide', age: '8 min ago' });
+      } else if (env.humidity >= humT - 10) {
+        push({ severity: 'medium', title: `Elevated humidity ${env.humidity}%`, field: 'Farm-wide', age: '11 min ago' });
+      }
     }
 
-    if (env.rainfall >= 12) {
-      push({ severity: 'high', title: `Heavy rain ${env.rainfall.toFixed(1)} mm`, field: 'Farm-wide', age: '5 min ago' });
-    } else if (env.rainfall < 0.5) {
-      push({ severity: 'info', title: 'Dry weather — irrigation dependent', field: 'Farm-wide', age: '9 min ago' });
+    if (settings.notifyWeather) {
+      if (env.rainfall >= 12) {
+        push({ severity: 'high', title: `Heavy rain ${env.rainfall.toFixed(1)} mm`, field: 'Farm-wide', age: '5 min ago' });
+      } else if (env.rainfall < 0.5) {
+        push({ severity: 'info', title: 'Dry weather — irrigation dependent', field: 'Farm-wide', age: '9 min ago' });
+      }
     }
 
-    if (env.soilMoisture < 48) {
-      push({ severity: env.soilMoisture < 40 ? 'critical' : 'high', title: `Farm soil moisture low (${env.soilMoisture.toFixed(0)}%)`, field: 'Farm-wide', age: '7 min ago' });
-    } else {
-      push({ severity: 'info', title: `Soil moisture on target (${Number(env.soilMoisture).toFixed(0)}%)`, field: 'Farm-wide', age: '3 min ago' });
+    if (settings.notifyIrrigation) {
+      if (env.soilMoisture < moistMin) {
+        push({ severity: env.soilMoisture < moistMin - 8 ? 'critical' : 'high', title: `Farm soil moisture low (${env.soilMoisture.toFixed(0)}%)`, field: 'Farm-wide', age: '7 min ago' });
+      } else {
+        push({ severity: 'info', title: `Soil moisture on target (${Number(env.soilMoisture).toFixed(0)}%)`, field: 'Farm-wide', age: '3 min ago' });
+      }
     }
 
     if (sim.stressHeat > 0.25) {
@@ -355,7 +475,7 @@ export default function App() {
     }
 
     // Roll up field issues into farm-level lines
-    for (const f of FIELDS) {
+    for (const f of dynamicFields) {
       if (f.soilMoisture < 50) {
         push({
           severity: f.soilMoisture < 42 ? 'critical' : 'high',
@@ -406,6 +526,12 @@ export default function App() {
     sim.alerts,
     sim.stage,
     sim.day,
+    settings.heatAlertC,
+    settings.humidityAlert,
+    settings.moistureMin,
+    settings.notifyCritical,
+    settings.notifyWeather,
+    settings.notifyIrrigation,
   ]);
 
   // Feed live backend weather into the twin environment
@@ -434,12 +560,13 @@ export default function App() {
     liveWeather?.condition,
   ]);
 
-  // Global playback for tabs that don't own their own timer
+  // Global playback for tabs that don't own their own timer (speed from Settings)
   useEffect(() => {
     if (!isPlaying) return;
     // SimulationHub and DigitalTwinMap run their own intervals
     if (activeTab === 'simulation' || activeTab === 'twin') return;
     const varietyId = fieldVarietyMap[selectedField] || 'thompson';
+    const intervalMs = Math.max(200, Math.round(1000 / (settings.simSpeed || 1)));
     const id = window.setInterval(() => {
       setSim((prev) => {
         if (prev.day >= 150) {
@@ -448,9 +575,9 @@ export default function App() {
         }
         return stepSimulation(prev, undefined, undefined, varietyId);
       });
-    }, 600);
+    }, intervalMs);
     return () => window.clearInterval(id);
-  }, [isPlaying, activeTab, fieldVarietyMap, selectedField]);
+  }, [isPlaying, activeTab, fieldVarietyMap, selectedField, settings.simSpeed]);
 
   return (
     <div className="flex h-screen w-screen bg-[#060B12] text-white overflow-hidden">
@@ -460,7 +587,9 @@ export default function App() {
           <div className="h-14 flex items-center gap-2.5 px-4 border-b border-[#1e2d40]">
             <div className="w-7 h-7 rounded-md bg-emerald-900/50 flex items-center justify-center border border-emerald-500/40 text-sm">🍇</div>
             <div>
-              <div className="font-bold text-[12px] tracking-wide leading-tight">APOLLO AGRIVERSE</div>
+              <div className="font-bold text-[12px] tracking-wide leading-tight truncate max-w-[140px]" title={settings.farmName}>
+                {settings.farmName || 'APOLLO AGRIVERSE'}
+              </div>
               <div className="text-[8px] text-slate-400 uppercase tracking-widest">Digital Twin System</div>
             </div>
           </div>
@@ -637,6 +766,7 @@ export default function App() {
               <div className="flex-1 flex flex-col min-h-0 min-w-0">
                 <SimulatedBanner label="Digital Twin map & field physics" />
                 <DigitalTwinMap
+                  key={`twin-${dynamicFields.length}-${settings.primaryCrop}`}
                   sim={sim}
                   setSim={setSim}
                   isPlaying={isPlaying}
@@ -651,6 +781,8 @@ export default function App() {
                   setFieldSoil={setFieldSoil}
                   fieldVarietyMap={fieldVarietyMap}
                   setFieldVariety={setFieldVariety}
+                  fields={dynamicFields}
+                  showGrapeVines={primaryCrop.twinGrapeVisual}
                 />
               </div>
             )}
@@ -660,6 +792,11 @@ export default function App() {
                 <LifecyclePanel
                   sim={sim}
                   varietyId={fieldVarietyMap[selectedField] || 'thompson'}
+                  soilId={fieldSoilMap[selectedField] || 'alluvial'}
+                  fieldId={selectedField}
+                  fieldName={dynamicFields.find((f) => f.id === selectedField)?.name}
+                  primaryCropId={settings.primaryCrop || 'grape'}
+                  primaryCropLabel={primaryCrop.label}
                 />
               </div>
             )}
@@ -669,9 +806,32 @@ export default function App() {
                 <SimulationPage sim={sim} setSim={setSim} isPlaying={isPlaying} setIsPlaying={setIsPlaying} />
               </div>
             )}
-            {activeTab === 'predictions' && <PredictionsPanel sim={sim} />}
+            {activeTab === 'predictions' && (
+              <PredictionsPanel
+                sim={sim}
+                fieldVarietyMap={fieldVarietyMap}
+                selectedField={selectedField}
+                primaryCropId={settings.primaryCrop || 'grape'}
+                primaryCropLabel={primaryCrop.label}
+              />
+            )}
             {activeTab === 'alerts' && <AlertsPage sim={sim} />}
-            {activeTab === 'weather' && <WeatherPanel onLiveWeather={pushLiveWeather} />}
+            {activeTab === 'weather' && (
+              <WeatherPanel
+                onLiveWeather={pushLiveWeather}
+                preferredCity={(settings.city || '').trim() || undefined}
+                preferredLat={
+                  settings.latitude === '' || settings.latitude === null || settings.latitude === undefined
+                    ? undefined
+                    : Number(settings.latitude)
+                }
+                preferredLon={
+                  settings.longitude === '' || settings.longitude === null || settings.longitude === undefined
+                    ? undefined
+                    : Number(settings.longitude)
+                }
+              />
+            )}
             {activeTab === 'soil' && (
               <SoilPanel
                 soilClass={activeFieldSoil}
@@ -718,11 +878,28 @@ export default function App() {
                 setMode={setMode}
                 isPlaying={isPlaying}
                 setIsPlaying={setIsPlaying}
+                fieldSoilMap={fieldSoilMap}
+                setFieldSoil={setFieldSoil}
+                fieldVarietyMap={fieldVarietyMap}
+                setFieldVariety={setFieldVariety}
+                fields={dynamicFields}
               />
             )}
           </div>
           {showRight && activeTab !== 'weather' && activeTab !== 'soil' && activeTab !== 'simulation' && (
-            <RightColumn sim={sim} selectedField={selectedField} level={level} liveWeather={liveWeather} />
+            <RightColumn
+              sim={sim}
+              selectedField={selectedField}
+              level={level}
+              liveWeather={liveWeather}
+              fieldSoilMap={fieldSoilMap}
+              fieldVarietyMap={fieldVarietyMap}
+              settingsUnits={settings.units}
+              waterAvailability={settings.waterAvailability}
+              fieldsList={dynamicFields}
+              farmCity={settings.city || liveWeather?.city}
+              primaryCropLabel={primaryCrop.label}
+            />
           )}
         </div>
       </div>

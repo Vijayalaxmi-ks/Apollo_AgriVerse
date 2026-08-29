@@ -1,10 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useRef, lazy, Suspense } from 'react';
 import {
   Thermometer, Droplets, Sun, Leaf, CloudRain, FlaskConical,
-  CheckCircle2, ChevronRight, Calendar,
+  CheckCircle2, ChevronRight, Calendar, Eye, EyeOff, Ruler,
 } from 'lucide-react';
-import type { SimState, LifecycleStage, GrapeVarietyId } from './simulation';
-import { STAGE_RANGES, getGrapeVariety } from './simulation';
+import type { SimState, LifecycleStage, GrapeVarietyId, SoilClassId } from './simulation';
+import { STAGE_RANGES, getGrapeVariety, getSoilClass, FIELDS } from './simulation';
+import type { VinePhase } from './VineScene';
+
+/** Polished 3D vine from v0 — lazy so Three/R3F loads only on Lifecycle tab */
+const VineScene = lazy(() => import('./VineScene'));
 
 /** Educational phases matching the reference infographic (11 stages) */
 type PhaseId =
@@ -718,233 +722,502 @@ function simToPhase(stage: LifecycleStage): PhaseId {
   return map[stage] || 'vegetative';
 }
 
-export default function LifecyclePanel({
-  sim,
-  varietyId = 'thompson',
+
+
+
+
+/** Twin-linked 3D vine (v0 VineScene) + phenology track */
+function Stage3DView({
+  phaseId,
+  berryHex,
+  midHex,
+  progress,
+  stageLabel,
 }: {
-  sim: SimState;
-  varietyId?: GrapeVarietyId | string;
+  phaseId: PhaseId;
+  berryHex: number;
+  midHex: number;
+  progress: number;
+  stageLabel: string;
 }) {
-  const variety = getGrapeVariety(varietyId);
-  const fromSim = simToPhase(sim.stage);
-  const [selectedId, setSelectedId] = useState<PhaseId>(fromSim);
-
-  const phase = useMemo(
-    () => PHASES.find((s) => s.id === selectedId) ?? PHASES[3],
-    [selectedId],
-  );
-
-  const nextPhase = PHASES.find((s) => s.num === phase.num + 1);
+  const track: { id: PhaseId; label: string }[] = [
+    { id: 'dormant_bud', label: 'Dormant Bud' },
+    { id: 'bud_break', label: 'Bud Break' },
+    { id: 'vegetative', label: 'Shoot Growth' },
+    { id: 'flowering', label: 'Flowering' },
+    { id: 'fruit_set', label: 'Fruit Set' },
+    { id: 'berry', label: 'Berry Growth' },
+    { id: 'veraison', label: 'Veraison' },
+    { id: 'ripening', label: 'Ripening' },
+    { id: 'harvest', label: 'Harvest' },
+    { id: 'post_harvest', label: 'Post Harvest' },
+    { id: 'dormancy', label: 'Dormancy' },
+  ];
+  const activeIdx = Math.max(0, track.findIndex((t) => t.id === phaseId));
+  const pct = Math.round((progress || 0) * 100);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-[#0b131e] space-y-4">
-      <div className="text-center">
-        <h2 className="text-xl font-bold text-emerald-300 tracking-wide">GRAPE LIFE CYCLE</h2>
-        <p className="text-[12px] text-slate-400">
-          From Bud to Bunch · <span className="text-violet-300 font-semibold">{variety.label}</span>
-          {' · '}{variety.color === 'coloured' ? 'Coloured' : 'White'} · {variety.market}
-        </p>
+    <div className="relative w-full h-full min-h-[340px] rounded-2xl overflow-hidden border border-emerald-900/40 bg-[#0c1812] flex flex-col">
+      <div className="relative flex-1 min-h-[280px]">
+        <Suspense
+          fallback={
+            <div className="flex h-full w-full items-center justify-center bg-[#0c1812]">
+              <div className="flex flex-col items-center gap-2">
+                <span className="h-6 w-6 animate-spin rounded-full border-2 border-emerald-400/40 border-t-emerald-400" />
+                <span className="text-[10px] uppercase tracking-wider text-emerald-300/70">Loading 3D vine</span>
+              </div>
+            </div>
+          }
+        >
+          <VineScene phase={phaseId as VinePhase} ripeHex={berryHex} midHex={midHex} />
+        </Suspense>
+
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0c1812] via-transparent to-transparent" />
+
+        <div className="pointer-events-none absolute top-3 left-3 flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-black/50 backdrop-blur px-2.5 py-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-200">Live 3D · Twin stage</span>
+        </div>
+        <div className="pointer-events-none absolute top-3 right-3 rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-[9px] uppercase tracking-wider text-slate-300/80">
+          Drag to rotate
+        </div>
+
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
+          <div className="flex items-end justify-between gap-2">
+            <div>
+              <div className="text-[9px] uppercase tracking-[0.2em] text-emerald-300/80">
+                Stage {activeIdx + 1} / {track.length}
+              </div>
+              <div className="text-lg font-bold text-white drop-shadow-lg">{stageLabel}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[9px] uppercase tracking-wider text-slate-300/70">Progress</div>
+              <div className="text-sm font-bold text-emerald-300">{pct}%</div>
+            </div>
+          </div>
+          <div className="mt-1.5 h-1.5 rounded-full bg-black/50 overflow-hidden border border-white/10">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-lime-400 transition-all"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Variety metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-        {[
-          ['Cycle', `${variety.cycleDays} days`],
-          ['Base yield', `${variety.baseYieldTPerAc} t/ac`],
-          ['Brix target', variety.brixTarget],
-          ['Berry size', `≤ ${variety.maxBerryMm} mm`],
-          ['Forecast', `${sim.yieldTons} t/ac`],
-        ].map(([k, v]) => (
-          <div key={k} className="rounded-xl border border-[#1e2d40] bg-[#0f1722] px-3 py-2">
-            <div className="text-[9px] uppercase text-slate-500">{k}</div>
-            <div className="text-[12px] font-semibold text-white">{v}</div>
+      {/* Phenology track — current = Digital Twin sim.stage (not selectable) */}
+      <div className="shrink-0 flex gap-1.5 overflow-x-auto p-2 bg-black/40 border-t border-emerald-900/40">
+        {track.map((t, i) => (
+          <div
+            key={t.id}
+            title={`${i + 1}. ${t.label}`}
+            className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 transition ${
+              i === activeIdx
+                ? 'border-emerald-400 bg-emerald-500/15 ring-1 ring-emerald-400/50'
+                : 'border-white/10 opacity-60'
+            }`}
+          >
+            <span
+              className={`flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold ${
+                i === activeIdx ? 'bg-emerald-400 text-emerald-950' : 'bg-white/15 text-slate-200'
+              }`}
+            >
+              {i + 1}
+            </span>
+            <span
+              className={`text-[9px] font-semibold whitespace-nowrap ${
+                i === activeIdx ? 'text-emerald-200' : 'text-slate-300'
+              }`}
+            >
+              {t.label}
+            </span>
+            {i === activeIdx && (
+              <span className="text-[8px] font-bold uppercase text-emerald-400">Live</span>
+            )}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
 
-      {/* 11-phase grid like reference */}
-      <div className="bg-[#0a1410] rounded-2xl border border-emerald-900/40 p-3 md:p-4">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-          {PHASES.slice(0, 6).map((s) => {
-            const active = s.id === selectedId;
-            return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setSelectedId(s.id)}
-                className={`text-left rounded-xl border overflow-hidden transition ${
-                  active
-                    ? 'border-emerald-400 ring-2 ring-emerald-500/40'
-                    : 'border-[#1e2d40] hover:border-emerald-700/50'
-                }`}
-              >
-                <div className="h-[112px] bg-black/40">
-                  <StageArt phase={s.id} ripeHex={variety.berryHex} midHex={variety.berryMidHex} />
-                </div>
-                <div className="px-2 py-1.5 bg-[#0f1a14]">
-                  <div className="text-[10px] font-bold text-emerald-300">
-                    {s.num}. {s.label}
-                  </div>
-                  <p className="text-[9px] text-slate-400 leading-snug mt-0.5 line-clamp-2">{s.shortDesc}</p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mt-2.5">
-          {PHASES.slice(6).map((s) => {
-            const active = s.id === selectedId;
-            return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setSelectedId(s.id)}
-                className={`text-left rounded-xl border overflow-hidden transition ${
-                  active
-                    ? 'border-emerald-400 ring-2 ring-emerald-500/40'
-                    : 'border-[#1e2d40] hover:border-emerald-700/50'
-                }`}
-              >
-                <div className="h-[112px] bg-black/40">
-                  <StageArt phase={s.id} ripeHex={variety.berryHex} midHex={variety.berryMidHex} />
-                </div>
-                <div className="px-2 py-1.5 bg-[#0f1a14]">
-                  <div className="text-[10px] font-bold text-emerald-300">
-                    {s.num}. {s.label}
-                  </div>
-                  <p className="text-[9px] text-slate-400 leading-snug mt-0.5 line-clamp-2">{s.shortDesc}</p>
-                </div>
-              </button>
-            );
-          })}
-          {/* Key highlights card */}
-          <div className="rounded-xl border border-[#1e2d40] bg-[#0f1a14] p-3 text-[10px] text-slate-300 space-y-1.5">
-            <div className="text-emerald-300 font-bold text-[11px]">Key Highlights</div>
-            <p>Full cycle ~8–12 months (varies with variety & climate).</p>
-            <p>Pollination is mainly by insects (bees) and wind — <span className="text-amber-200 font-semibold">entomophily</span>.</p>
-            <p>Healthy pollination → better set, bigger berries, higher yield.</p>
-            <p className="text-violet-300">Now viewing: {variety.label}</p>
+
+type FieldMeasure = {
+  areaHa?: string;
+  yieldTPerHa?: string;
+  densityPerHa?: string;
+  irrigationMm?: string;
+  canopyCm?: string;
+  shootCount?: string;
+  clusterCount?: string;
+  brix?: string;
+  notes?: string;
+};
+
+const emptyMeasure = (): FieldMeasure => ({
+  areaHa: '',
+  yieldTPerHa: '',
+  densityPerHa: '',
+  irrigationMm: '',
+  notes: '',
+});
+
+export default function LifecyclePanel({
+  sim,
+  varietyId = 'thompson',
+  soilId = 'alluvial',
+  fieldId,
+  fieldName,
+  primaryCropId = 'grape',
+  primaryCropLabel,
+}: {
+  sim: SimState;
+  varietyId?: GrapeVarietyId | string;
+  soilId?: SoilClassId | string;
+  fieldId?: string;
+  fieldName?: string;
+  primaryCropId?: string;
+  primaryCropLabel?: string;
+}) {
+  const isGrapeCrop =
+    !primaryCropId ||
+    primaryCropId === 'grape' ||
+    /grape|vine|raisin/i.test(primaryCropId) ||
+    /grape|vine|raisin/i.test(primaryCropLabel || '');
+
+  const variety = getGrapeVariety(varietyId);
+  const soil = getSoilClass(soilId);
+  const fieldMeta = fieldId ? FIELDS.find((f) => f.id === fieldId) : undefined;
+  const displayField = fieldName || fieldMeta?.name || 'Selected field';
+  const fieldKey = fieldId || displayField || 'default';
+
+  const activePhaseId = simToPhase(sim.stage);
+  const twinStageLabel = STAGE_RANGES.find((s) => s.id === sim.stage)?.label || sim.stage;
+
+  const [showStageList, setShowStageList] = useState(true);
+  const [measures, setMeasures] = useState<Record<string, FieldMeasure>>({});
+
+  // Farmer enters measurements in Settings — Lifecycle only displays them
+  const reloadMeasures = () => {
+    try {
+      const raw = localStorage.getItem('agriverse-lifecycle-measures-v1');
+      if (raw) setMeasures(JSON.parse(raw));
+      else setMeasures({});
+    } catch {
+      /* ignore */
+    }
+  };
+  useEffect(() => {
+    reloadMeasures();
+    const onSaved = () => reloadMeasures();
+    window.addEventListener('agriverse-field-measures-saved', onSaved);
+    window.addEventListener('storage', onSaved);
+    return () => {
+      window.removeEventListener('agriverse-field-measures-saved', onSaved);
+      window.removeEventListener('storage', onSaved);
+    };
+  }, []);
+
+  const measure = measures[fieldKey] || emptyMeasure();
+
+  if (!isGrapeCrop) {
+    return (
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-[#0b131e] flex items-center justify-center">
+        <div className="max-w-md w-full rounded-3xl border border-amber-500/25 bg-[#0c121c] p-6 text-center space-y-3">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-2xl">
+            🍇
+          </div>
+          <h2 className="text-lg font-bold text-white">Grape lifecycle only</h2>
+          <p className="text-[12px] text-slate-400 leading-relaxed">
+            Phenology is modelled for <span className="text-emerald-300 font-semibold">grape</span> varieties only.
+            Set primary crop to Grape in Settings to view the live Digital Twin stage for this field.
+          </p>
+          <div className="text-[10px] text-slate-600 pt-1">
+            Field {displayField} · soil {soil.shortLabel}
           </div>
         </div>
       </div>
+    );
+  }
 
-      {/* Detail panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <div className="lg:col-span-4 bg-[#16202d] rounded-2xl border border-[#1e2d40] p-4 space-y-3">
-          <div className="text-[10px] uppercase tracking-wider text-slate-500">Selected phase</div>
-          <div className="rounded-xl overflow-hidden border border-[#1e2d40] h-[168px]">
-            <StageArt phase={phase.id} ripeHex={variety.berryHex} midHex={variety.berryMidHex} wide />
+  const soilFit = variety.soilScore[(soil.id as SoilClassId)] ?? 50;
+  const yieldAdj = Math.round(variety.baseYieldTPerAc * (0.75 + (soilFit / 100) * 0.35) * 10) / 10;
+  const forecast =
+    typeof sim.yieldTons === 'number' && sim.yieldTons > 0
+      ? Math.round(sim.yieldTons * (0.9 + (soilFit / 100) * 0.2) * 10) / 10
+      : yieldAdj;
+
+  const cycleScale = variety.cycleDays / 150;
+  const phaseDaysLabel = (raw: string) => {
+    if (!raw.startsWith('Day')) return raw;
+    return raw.replace(/(\d+)/g, (m) => String(Math.round(Number(m) * cycleScale)));
+  };
+
+  const phase = useMemo(
+    () => PHASES.find((s) => s.id === activePhaseId) ?? PHASES[3],
+    [activePhaseId],
+  );
+  const nextPhase = PHASES.find((s) => s.num === phase.num + 1);
+
+  const reqOverrides = useMemo(() => {
+    const moistureNote =
+      soil.waterHolding === 'Very high'
+        ? 'Shorter cycles — soil holds well'
+        : soil.waterHolding === 'Low to moderate'
+          ? 'More frequent light irrigation'
+          : phase.requirements.moisture;
+    return {
+      ...phase.requirements,
+      moisture: moistureNote,
+      ph: soil.phRange || phase.requirements.ph,
+      irrigation: soil.drainage?.toLowerCase().includes('slow')
+        ? 'Avoid over-irrigation; short drip pulses'
+        : phase.requirements.irrigation,
+    };
+  }, [phase, soil]);
+
+  const stageProgressPct = Math.round((sim.stageProgress || 0) * 100);
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto bg-[#0b131e]">
+      <div className="p-3 md:p-4 space-y-3">
+        {/* Header */}
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-bold text-emerald-300 tracking-wide">GRAPE LIFE CYCLE</h2>
+            <p className="text-[11px] text-slate-400">
+              Live twin stage · <span className="text-violet-300 font-semibold">{variety.label}</span>
+              {' · '}{variety.color === 'coloured' ? 'Coloured' : 'White'} · {variety.market}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Field <span className="text-emerald-300 font-semibold">{displayField}</span>
+              {' · '}Soil <span className="text-amber-200/90 font-semibold">{soil.shortLabel}</span>
+              {' · '}Fit{' '}
+              <span className={soilFit >= 75 ? 'text-emerald-400 font-semibold' : soilFit >= 55 ? 'text-amber-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                {soilFit}/100
+              </span>
+            </p>
           </div>
-          <h3 className="text-lg font-bold text-white">
-            {phase.num}. {phase.label}
-          </h3>
-          <p className="text-[12px] text-slate-300 leading-relaxed">{phase.longDesc}</p>
-          {phase.id === 'flowering' && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100 leading-snug">
-              <span className="font-bold text-amber-300">Entomophily</span> — pollination through insects
-              (especially bees). Pollen moves from <strong>anther</strong> (male) to <strong>stigma</strong> (female);
-              wind also helps.
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[11px] text-emerald-200 font-semibold">{phase.label}</span>
+              <span className="text-[10px] text-slate-500">Day {sim.day}</span>
+              <span className="text-[10px] text-slate-500">{stageProgressPct}%</span>
             </div>
-          )}
-          <div className="flex justify-between text-[11px]">
-            <span className="text-slate-500">Timing</span>
-            <span className="text-white font-medium">{phase.days}</span>
-          </div>
-          <div className="flex justify-between text-[11px]">
-            <span className="text-slate-500">Next</span>
-            <span className="text-emerald-300 font-medium flex items-center gap-0.5">
-              {nextPhase ? nextPhase.label : 'Cycle complete'} <ChevronRight size={12} />
-            </span>
+            <button
+              type="button"
+              onClick={() => setShowStageList((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#1e2d40] bg-[#121a27] px-2.5 py-1.5 text-[11px] text-slate-300 hover:border-emerald-500/40 hover:text-emerald-200 transition"
+              title={showStageList ? 'Hide stage list' : 'Show stage list'}
+            >
+              {showStageList ? <EyeOff size={14} /> : <Eye size={14} />}
+              {showStageList ? 'Hide stages' : 'Show stages'}
+            </button>
           </div>
         </div>
 
-        <div className="lg:col-span-5 bg-[#16202d] rounded-2xl border border-[#1e2d40] p-4 space-y-4">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1">
-              <Sun size={12} className="text-amber-400" /> Requirements
+        {/* Metrics strip */}
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+          {[
+            ['Field', displayField],
+            ['Variety', variety.label],
+            ['Cycle', `${variety.cycleDays} d`],
+            ['Soil-adj. yield', `${yieldAdj} t/ac`],
+            ['Brix target', variety.brixTarget],
+            ['Forecast', `${forecast} t/ac`],
+          ].map(([k, v]) => (
+            <div key={k} className="rounded-xl border border-[#1e2d40] bg-[#0f1722] px-3 py-2">
+              <div className="text-[9px] uppercase text-slate-500">{k}</div>
+              <div className="text-[12px] font-semibold text-white truncate">{v}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Main: 3D + optional side stage list */}
+        <div className={`grid gap-3 ${showStageList ? 'lg:grid-cols-12' : 'grid-cols-1'}`}>
+          <div className={showStageList ? 'lg:col-span-8' : ''}>
+            <div className="h-[420px] md:h-[480px]">
+              <Stage3DView
+                phaseId={phase.id}
+                berryHex={variety.berryHex}
+                midHex={variety.berryMidHex}
+                progress={sim.stageProgress || 0}
+                stageLabel={phase.label}
+              />
+            </div>
+            <div className="mt-2 rounded-xl border border-[#1e2d40] bg-[#121a27] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <h3 className="text-base font-bold text-white">
+                  {phase.num}. {phase.label}
+                  <span className="ml-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-400">Live</span>
+                </h3>
+                <span className="text-[11px] text-slate-500">
+                  Twin: {twinStageLabel} · {phaseDaysLabel(phase.days)}
+                </span>
+              </div>
+              <p className="text-[12px] text-slate-300 leading-relaxed">{phase.longDesc}</p>
+              {nextPhase && (
+                <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
+                  Next <ChevronRight size={12} className="text-emerald-400" />
+                  <span className="text-emerald-300">{nextPhase.label}</span>
+                </p>
+              )}
+              {/* Progress bar */}
+              <div className="mt-2 h-1.5 rounded-full bg-[#0b131e] overflow-hidden border border-[#1e2d40]">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-lime-400 transition-all"
+                  style={{ width: `${stageProgressPct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {showStageList && (
+            <div className="lg:col-span-4 rounded-2xl border border-[#1e2d40] bg-[#0f1722] flex flex-col max-h-[480px]">
+              <div className="px-3 py-2 border-b border-[#1e2d40] flex items-center justify-between">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Stages · overview
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowStageList(false)}
+                  className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-white/5"
+                  title="Hide panel"
+                >
+                  <EyeOff size={14} />
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1 p-2 space-y-1">
+                {PHASES.map((s) => {
+                  const active = s.id === activePhaseId;
+                  return (
+                    <div
+                      key={s.id}
+                      className={`rounded-xl border px-2.5 py-2 transition ${
+                        active
+                          ? 'border-emerald-400/60 bg-emerald-500/10 shadow-[0_0_16px_rgba(16,185,129,0.12)]'
+                          : 'border-transparent bg-[#121a27]/80 opacity-70'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold ${active ? 'text-emerald-300' : 'text-slate-600'}`}>
+                          {s.num}
+                        </span>
+                        <span className={`text-[12px] font-semibold ${active ? 'text-white' : 'text-slate-400'}`}>
+                          {s.label}
+                        </span>
+                        {active && (
+                          <span className="ml-auto text-[8px] font-bold uppercase tracking-wider rounded px-1.5 py-0.5 bg-emerald-500 text-white">
+                            Live
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 leading-snug mt-0.5 pl-5">{s.shortDesc}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Field measurements + requirements */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+                    <div className="lg:col-span-5 rounded-2xl border border-[#1e2d40] bg-[#121a27] p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+                <Ruler size={12} className="text-sky-400" />
+                Field measurements · {displayField}
+              </div>
+              <span className="text-[9px] text-slate-500">From Settings</span>
+            </div>
+            <p className="text-[10px] text-slate-500">
+              Entered by the farmer in <span className="text-sky-300 font-semibold">Settings → Field measurements</span>. Values are per field and paired with the live twin stage.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ['Area (ha)', measure.areaHa || measure.canopyCm],
+                ['Yield (t/ha)', measure.yieldTPerHa || measure.shootCount],
+                ['Density (/ha)', measure.densityPerHa || measure.clusterCount],
+                ['Irrigation (mm)', measure.irrigationMm || measure.brix],
+              ].map(([label, val]) => (
+                <div key={label} className="rounded-lg border border-[#1e2d40] bg-[#0b131e] px-2 py-1.5">
+                  <div className="text-[9px] uppercase text-slate-500">{label}</div>
+                  <div className="text-[13px] font-semibold text-white">{val || '—'}</div>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-lg border border-[#1e2d40] bg-[#0b131e] px-2 py-1.5">
+              <div className="text-[9px] uppercase text-slate-500">Notes</div>
+              <div className="text-[11px] text-slate-300 min-h-[2rem]">{measure.notes || 'No notes yet — add them in Settings.'}</div>
+            </div>
+            {(measure.areaHa || measure.yieldTPerHa || measure.densityPerHa || measure.irrigationMm) ? (
+              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-[10px] text-emerald-100/90">
+                {displayField} @ {phase.label}:
+                {measure.areaHa ? ` ${measure.areaHa} ha` : ''}
+                {measure.yieldTPerHa ? ` · ${measure.yieldTPerHa} t/ha` : ''}
+                {measure.densityPerHa ? ` · ${measure.densityPerHa} plants/ha` : ''}
+                {measure.irrigationMm ? ` · ${measure.irrigationMm} mm` : ''}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-100/80">
+                No hectare measurements for this field yet. Enter them in Settings → Farm profile, then Save.
+              </div>
+            )}
+          </div>
+
+                    <div className="lg:col-span-4 rounded-2xl border border-[#1e2d40] bg-[#121a27] p-3 space-y-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1 font-bold">
+              <Sun size={12} className="text-amber-400" /> Requirements · {soil.shortLabel}
             </div>
             <div className="grid grid-cols-2 gap-2 text-[11px]">
-              {Object.entries(phase.requirements).map(([k, v]) => (
+              {Object.entries(reqOverrides).map(([k, v]) => (
                 <div key={k} className="rounded-lg bg-[#0f1722] border border-[#1e2d40] px-2 py-1.5">
                   <div className="text-[9px] text-slate-500 capitalize">{k}</div>
                   <div className="text-white font-medium">{v}</div>
                 </div>
               ))}
             </div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Risks</div>
-            <div className="space-y-1.5">
-              {phase.risks.map((r) => (
-                <div key={r.title} className="flex items-start gap-2 text-[11px]">
-                  <RiskIcon type={r.icon} />
-                  <div>
-                    <span className="text-white font-medium">{r.title}</span>
-                    <span className="text-slate-500"> · {r.detail}</span>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Risks</div>
+              <div className="space-y-1">
+                {phase.risks.map((r) => (
+                  <div key={r.title} className="flex items-start gap-2 text-[11px]">
+                    <RiskIcon type={r.icon} />
+                    <div>
+                      <span className="text-white font-medium">{r.title}</span>
+                      <span className="text-slate-500"> · {r.detail}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-2">Recommendations</div>
-            <ul className="space-y-1">
-              {phase.recommendations.map((t) => (
-                <li key={t} className="flex gap-1.5 text-[11px] text-slate-300">
-                  <CheckCircle2 size={12} className="text-emerald-400 shrink-0 mt-0.5" />
-                  {t}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
 
-        <div className="lg:col-span-3 space-y-4">
-          <div className="bg-[#16202d] rounded-2xl border border-[#1e2d40] p-4">
-            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Stage impact on yield</div>
-            <YieldImpactChart phases={PHASES} activeId={phase.id} />
-          </div>
-          <div className="bg-[#16202d] rounded-2xl border border-[#1e2d40] p-4 text-[11px] text-slate-300 space-y-2">
-            <div className="flex items-center gap-1.5 text-slate-500 uppercase text-[10px]">
-              <Calendar size={12} /> Live simulation
+          <div className="lg:col-span-3 rounded-2xl border border-[#1e2d40] bg-[#121a27] p-3 space-y-2 text-[11px] text-slate-300">
+            <div className="flex items-center gap-1.5 text-slate-500 uppercase text-[10px] font-bold">
+              <Calendar size={12} /> Twin linkage
             </div>
+            <div className="flex justify-between"><span>Sim day</span><span className="text-white font-semibold">{sim.day}</span></div>
+            <div className="flex justify-between"><span>Sim stage</span><span className="text-emerald-300 font-semibold">{twinStageLabel}</span></div>
+            <div className="flex justify-between"><span>Variety</span><span className="text-violet-300 font-semibold">{variety.label}</span></div>
             <div className="flex justify-between">
-              <span>Sim day</span>
-              <span className="text-white font-semibold">{sim.day}</span>
+              <span>Berry</span>
+              <span className="font-semibold" style={{ color: hexCss(variety.berryHex) }}>{variety.color}</span>
             </div>
-            <div className="flex justify-between">
-              <span>Sim stage</span>
-              <span className="text-emerald-300 font-semibold">
-                {STAGE_RANGES.find((s) => s.id === sim.stage)?.label}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span>Variety</span>
-              <span className="text-violet-300 font-semibold">{variety.label}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Berry colour</span>
-              <span className="font-semibold" style={{ color: hexCss(variety.berryHex) }}>
-                {variety.color}
-              </span>
+            <div className="pt-1">
+              <div className="text-[10px] uppercase text-slate-500 mb-1">Recommendations</div>
+              <ul className="space-y-1">
+                {phase.recommendations.slice(0, 3).map((t) => (
+                  <li key={t} className="flex gap-1.5 text-[10px] text-slate-300">
+                    <CheckCircle2 size={11} className="text-emerald-400 shrink-0 mt-0.5" />
+                    {t}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Footer summary like reference */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 rounded-2xl border border-[#1e2d40] bg-[#0f1722] p-3">
-        {[
-          ['Total cycle', '8 – 12 months'],
-          ['Critical factor', 'Pollination & fruit set'],
-          ['Needs', 'Sunlight · Water · Nutrients'],
-          ['Outcome', 'Healthy vines · Quality grapes'],
-        ].map(([k, v]) => (
-          <div key={k}>
-            <div className="text-[9px] uppercase text-slate-500">{k}</div>
-            <div className="text-[12px] font-semibold text-emerald-200">{v}</div>
-          </div>
-        ))}
       </div>
     </div>
   );

@@ -606,77 +606,94 @@ export function createInitialState(day = 95, varietyId?: GrapeVarietyId | string
   };
 }
 
-export const FIELDS: FieldInfo[] = [
-  {
-    id: 'A',
-    name: 'Field A',
-    acres: 2.3,
-    health: 89,
-    plants: 1080,
-    variety: 'Thompson Seedless',
-    rowSpacing: '2.5 m',
-    plantSpacing: '1.5 m',
-    soilType: 'Sandy Loam',
-    soilMoisture: 64,
-    lastIrrigation: '2 days ago',
-    yieldEst: 4.9,
-    x: -14,
-    z: -12,
-    w: 18,
-    d: 14,
-  },
-  {
-    id: 'B',
-    name: 'Field B',
-    acres: 2.45,
-    health: 85,
-    plants: 1200,
-    variety: 'Thompson Seedless',
-    rowSpacing: '2.5 m',
-    plantSpacing: '1.5 m',
-    soilType: 'Clay Loam',
-    soilMoisture: 58,
-    lastIrrigation: '1 day ago',
-    yieldEst: 4.6,
-    x: 14,
-    z: -12,
-    w: 18,
-    d: 14,
-  },
-  {
-    id: 'C',
-    name: 'Field C',
-    acres: 2.15,
-    health: 82,
-    plants: 980,
-    variety: 'Flame Seedless',
-    rowSpacing: '2.4 m',
-    plantSpacing: '1.4 m',
-    soilType: 'Loamy Sand',
-    soilMoisture: 55,
-    lastIrrigation: '3 days ago',
-    yieldEst: 4.2,
-    x: -14,
-    z: 12,
-    w: 18,
-    d: 14,
-  },
-  {
-    id: 'D',
-    name: 'Field D',
-    acres: 2.6,
-    health: 82,
-    plants: 1060,
-    variety: 'Thompson Seedless',
-    rowSpacing: '2.6 m',
-    plantSpacing: '1.6 m',
-    soilType: 'Sandy Clay',
-    soilMoisture: 60,
-    lastIrrigation: '2 days ago',
-    yieldEst: 4.5,
-    x: 14,
-    z: 12,
-    w: 18,
-    d: 14,
-  },
+/** Crop catalog — farmer can select any crop for recommendations / profile focus */
+export type CropCatalogEntry = {
+  id: string;
+  label: string;
+  category: 'horticulture' | 'cereal' | 'pulse' | 'oilseed' | 'cash' | 'fodder';
+  /** Twin renders grape vines only when this is true */
+  twinGrapeVisual: boolean;
+  waterNeed: 'low' | 'medium' | 'high';
+  typicalYieldNote: string;
+};
+
+export const CROP_CATALOG: CropCatalogEntry[] = [
+  { id: 'grape', label: 'Grape', category: 'horticulture', twinGrapeVisual: true, waterNeed: 'medium', typicalYieldNote: '4–6 t/ac table/raisin' },
+  { id: 'pomegranate', label: 'Pomegranate', category: 'horticulture', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: '8–12 t/ha' },
+  { id: 'sugarcane', label: 'Sugarcane', category: 'cash', twinGrapeVisual: false, waterNeed: 'high', typicalYieldNote: '70–100 t/ha' },
+  { id: 'cotton', label: 'Cotton', category: 'cash', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: '15–25 q/ha' },
+  { id: 'soybean', label: 'Soybean', category: 'oilseed', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: '15–25 q/ha' },
+  { id: 'sorghum', label: 'Sorghum (Jowar)', category: 'cereal', twinGrapeVisual: false, waterNeed: 'low', typicalYieldNote: '15–30 q/ha' },
+  { id: 'wheat', label: 'Wheat', category: 'cereal', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: '30–45 q/ha' },
+  { id: 'maize', label: 'Maize', category: 'cereal', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: '40–60 q/ha' },
+  { id: 'chickpea', label: 'Chickpea (Gram)', category: 'pulse', twinGrapeVisual: false, waterNeed: 'low', typicalYieldNote: '10–18 q/ha' },
+  { id: 'onion', label: 'Onion', category: 'horticulture', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: '20–30 t/ha' },
+  { id: 'tomato', label: 'Tomato', category: 'horticulture', twinGrapeVisual: false, waterNeed: 'high', typicalYieldNote: '40–60 t/ha' },
+  { id: 'banana', label: 'Banana', category: 'horticulture', twinGrapeVisual: false, waterNeed: 'high', typicalYieldNote: '40–60 t/ha' },
+  { id: 'groundnut', label: 'Groundnut', category: 'oilseed', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: '15–25 q/ha' },
+  { id: 'turmeric', label: 'Turmeric', category: 'cash', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: '20–30 t/ha' },
+  { id: 'fodder', label: 'Fodder / Napier', category: 'fodder', twinGrapeVisual: false, waterNeed: 'medium', typicalYieldNote: 'Multiple cuts/year' },
 ];
+
+export function getCropCatalogEntry(id: string): CropCatalogEntry {
+  return CROP_CATALOG.find((c) => c.id === id) || CROP_CATALOG[0];
+}
+
+/**
+ * Build N rectangular field pads arranged in a grid for the Digital Twin.
+ * Visual layout scales with count (1–8). Grape variety labels applied by caller maps.
+ */
+export function buildDynamicFields(
+  count: number,
+  opts?: {
+    soilLabel?: string;
+    varietyLabel?: string;
+    defaultAcres?: number;
+  },
+): FieldInfo[] {
+  const n = Math.max(1, Math.min(8, Math.round(count || 4)));
+  const cols = n <= 1 ? 1 : n <= 2 ? 2 : n <= 4 ? 2 : n <= 6 ? 3 : 4;
+  const rows = Math.ceil(n / cols);
+  const gap = 4;
+  const cellW = 16;
+  const cellD = 12;
+  const totalW = cols * cellW + (cols - 1) * gap;
+  const totalD = rows * cellD + (rows - 1) * gap;
+  const originX = -totalW / 2 + cellW / 2;
+  const originZ = -totalD / 2 + cellD / 2;
+  const ids = 'ABCDEFGH';
+  const soilLabel = opts?.soilLabel || 'Loam';
+  const varietyLabel = opts?.varietyLabel || 'Thompson Seedless';
+  const baseAcres = opts?.defaultAcres ?? 2.2;
+
+  const out: FieldInfo[] = [];
+  for (let i = 0; i < n; i++) {
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    const id = ids[i];
+    const acres = Math.round((baseAcres + (i % 3) * 0.15) * 100) / 100;
+    const plants = Math.round(acres * 480);
+    out.push({
+      id,
+      name: `Field ${id}`,
+      acres,
+      health: 80 + (i % 5) * 2,
+      plants,
+      variety: varietyLabel,
+      rowSpacing: '2.5 m',
+      plantSpacing: '1.5 m',
+      soilType: soilLabel,
+      soilMoisture: 52 + (i % 4) * 4,
+      lastIrrigation: `${1 + (i % 3)} day${i % 3 ? 's' : ''} ago`,
+      yieldEst: Math.round((4.2 + (i % 4) * 0.2) * 10) / 10,
+      x: originX + c * (cellW + gap),
+      z: originZ + r * (cellD + gap),
+      w: cellW,
+      d: cellD,
+    });
+  }
+  return out;
+}
+
+/** Default layout (4 fields) — App rebuilds via buildDynamicFields from farmer field count */
+export const FIELDS: FieldInfo[] = buildDynamicFields(4);

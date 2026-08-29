@@ -1,0 +1,111 @@
+{
+  "FARM_MAHARASHTRA_NASHIK_156": {
+    "farm_id": "FARM_MAHARASHTRA_NASHIK_156",
+    "region_id": "REG_MAHARA_5092",
+    "soil_id": "SOIL_NASHIK_28028",
+    "farm_name": "Diksha Grape Farm",
+    "operator": "Farm Manager",
+    "region": "Maharashtra",
+    "district": "Nashik",
+    "city": "Nashik",
+    "latitude": 20.0059,
+    "longitude": 73.7797,
+    "water_availability": "medium",
+    "primary_crop": "grape",
+    "default_soil_class": "alluvial",
+    "field_count": 2,
+    "fields": [
+      {
+        "field_id": "A",
+        "name": "Field A",
+        "acres": 2.2,
+        "soil_class": "red",
+        "crop_id": "grape",
+        "grape_variety": "sharad",
+        "notes": "Healthy Thompson Seedless block; drip irrigation and hydrogel-assisted moisture retention."
+      },
+      {
+        "field_id": "B",
+        "name": "Field B",
+        "acres": 2.35,
+        "soil_class": "alluvial",
+        "crop_id": "grape",
+        "grape_variety": "tas_a_ganesh",
+        "notes": "Thompson Seedless vines; slightly higher irrigation requirement; monitored soil moisture."
+      }
+    ],
+    "measures": {
+      "A": {
+        "areaHa": "2.20",
+        "yieldTPerHa": "18.5",
+        "densityPerHa": "1650",
+        "irrigationMm": "510",
+        "notes": "Healthy Thompson Seedless block; drip irrigation and hydrogel-assisted moisture retention."
+      },
+      "B": {
+        "areaHa": "2.35",
+        "yieldTPerHa": "17.2",
+        "densityPerHa": "1580",
+        "irrigationMm": "550",
+        "notes": "Thompson Seedless vines; slightly higher irrigation requirement; monitored soil moisture."
+      }
+    },
+    "profile_label": "Diksha Grape Farm",
+    "saved_at": "2026-08-29T14:30:05.496930+00:00"
+  },
+  "_active_farm_id": "FARM_MAHARASHTRA_NASHIK_198",
+  "FARM_MAHARASHTRA_NASHIK_198": {
+    "farm_id": "FARM_MAHARASHTRA_NASHIK_198",
+    "region_id": "REG_MAHARA_5386",
+    "soil_id": "SOIL_NASHIK_28574",
+    "farm_name": "My Grape Farm",
+    "operator": "Farm Manager",
+    "region": "Maharashtra",
+    "district": "Nashik",
+    "city": "Nashik",
+    "latitude": 20.0059,
+    "longitude": 73.7797,
+    "water_availability": "medium",
+    "primary_crop": "grape",
+    "default_soil_class": "lateritic",
+    "field_count": 2,
+    "fields": [
+      {
+        "field_id": "A",
+        "name": "Field A",
+        "acres": 2.2,
+        "soil_class": "alluvial",
+        "crop_id": "grape",
+        "grape_variety": "sharad",
+        "notes": "Thompson Seedless vines; slightly higher irrigation requirement; monitored soil moisture."
+      },
+      {
+        "field_id": "B",
+        "name": "Field B",
+        "acres": 2.35,
+        "soil_class": "red",
+        "crop_id": "grape",
+        "grape_variety": "tas_a_ganesh",
+        "notes": "Healthy Thompson Seedless block; drip irrigation and hydrogel-assisted moisture retention."
+      }
+    ],
+    "measures": {
+      "A": {
+        "areaHa": "2.35",
+        "yieldTPerHa": "17.2",
+        "densityPerHa": "1580",
+        "irrigationMm": "550",
+        "notes": "Thompson Seedless vines; slightly higher irrigation requirement; monitored soil moisture."
+      },
+      "B": {
+        "areaHa": "2.20",
+        "yieldTPerHa": "18.5",
+        "densityPerHa": "1650",
+        "irrigationMm": "520",
+        "notes": "Healthy Thompson Seedless block; drip irrigation and hydrogel-assisted moisture retention."
+      }
+    },
+    "profile_label": "My Grape Farm",
+    "saved_at": "2026-08-29T15:54:37.067737+00:00"
+  }
+}

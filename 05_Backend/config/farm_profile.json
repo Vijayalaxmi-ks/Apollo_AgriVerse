@@ -1,7 +1,12 @@
 {
-  "farm_id": "FARM_MH_NASHIK_01",
-  "region_id": "REG_0002",
-  "soil_id": "SOIL_00001",
+  "farm_id": "FARM_MAHARASHTRA_NASHIK_198",
+  "region_id": "REG_MAHARA_5386",
+  "soil_id": "SOIL_NASHIK_28574",
   "water_availability": "medium",
-  "farm_area_ha": 2.5
+  "latitude": 20.0059,
+  "longitude": 73.7797,
+  "city": "Nashik",
+  "farm_name": "My Grape Farm",
+  "primary_crop": "grape",
+  "field_count": 2
 }

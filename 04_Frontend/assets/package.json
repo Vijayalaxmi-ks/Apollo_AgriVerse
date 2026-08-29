@@ -1,8 +1,0 @@
-{
-  "dependencies": {
-    "lucide-react": "^1.33.0",
-    "react": "^19.2.8",
-    "recharts": "^3.10.1",
-    "three": "^0.185.1"
-  }
-}

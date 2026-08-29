@@ -27,13 +27,17 @@ interface Props {
   mode: 'auto' | 'manual';
   setMode: (m: 'auto' | 'manual') => void;
   fieldSoilMap: FieldSoilMap;
-  setFieldSoil: (fieldId: string, soilId: SoilClassId) => void;
+  setFieldSoil?: (fieldId: string, soilId: SoilClassId) => void;
   fieldVarietyMap: FieldVarietyMap;
-  setFieldVariety: (fieldId: string, varietyId: GrapeVarietyId) => void;
+  setFieldVariety?: (fieldId: string, varietyId: GrapeVarietyId) => void;
+  /** Farmer-configured field parcels (count drives layout) */
+  fields?: FieldInfo[];
+  /** When false, pads still show but vine density is reduced (non-grape primary crop) */
+  showGrapeVines?: boolean;
 }
 
-function getField(id: string): FieldInfo {
-  return FIELDS.find((f) => f.id === id) || FIELDS[1];
+function getFieldFrom(fields: FieldInfo[], id: string): FieldInfo {
+  return fields.find((f) => f.id === id) || fields[0] || FIELDS[0];
 }
 
 /** Procedural farm-soil texture (clumpy, not smooth) */
@@ -76,11 +80,52 @@ function makeSoilTexture(base = '#b8956a', dark = '#7a5a3a', light = '#d4b896'):
   return tex;
 }
 
+/** Worn farm track — mixed grit, not smooth concrete, not crop-soil browns */
+function makePathTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d')!;
+  // Base: cool dusty clay-stone (avoids red/black/alluvial/lateritic/alkaline warm tones)
+  ctx.fillStyle = '#7a756c';
+  ctx.fillRect(0, 0, 128, 128);
+  // Irregular darker patches (ruts / moisture)
+  for (let i = 0; i < 48; i++) {
+    const x = Math.random() * 128;
+    const y = Math.random() * 128;
+    const r = 3 + Math.random() * 10;
+    ctx.fillStyle = `rgba(45,42,38,${0.12 + Math.random() * 0.2})`;
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * (0.5 + Math.random() * 0.5), Math.random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Light grit flecks
+  for (let i = 0; i < 220; i++) {
+    const x = Math.random() * 128;
+    const y = Math.random() * 128;
+    ctx.fillStyle = `rgba(200,196,188,${0.08 + Math.random() * 0.15})`;
+    ctx.fillRect(x, y, 1 + Math.random() * 2, 1 + Math.random() * 2);
+  }
+  // Soft dual ruts along length (farm vehicle wear)
+  ctx.fillStyle = 'rgba(40,38,34,0.18)';
+  ctx.fillRect(38, 0, 8, 128);
+  ctx.fillRect(82, 0, 8, 128);
+  ctx.fillStyle = 'rgba(180,176,168,0.1)';
+  ctx.fillRect(42, 0, 3, 128);
+  ctx.fillRect(86, 0, 3, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 4);
+  return tex;
+}
+
+
+
 const SOIL_TEX = makeSoilTexture('#c4a574', '#8b6914', '#e0c9a0');
 const SOIL_TEX_DARK = makeSoilTexture('#a67c52', '#6b4423', '#c4a574');
 
-/** Distinct farm-road / path material — cool gray gravel, never matches soil classes */
-const PATH_TEX = makeSoilTexture('#6b7280', '#4b5563', '#9ca3af');
+/** Farm tracks — natural grit, distinct from all soil-class colours */
+const PATH_TEX = makePathTexture();
 
 /* Per soil-class materials so each field can show a different soil color */
 function buildSoilMats(id: SoilClassId) {
@@ -108,8 +153,8 @@ const MAT = {
   // Fallback / ground (updated to active field soil when drilling in)
   soil: new THREE.MeshLambertMaterial({ map: SOIL_TEX, color: 0xffffff }),
   soilDark: new THREE.MeshLambertMaterial({ map: SOIL_TEX_DARK, color: 0xffffff }),
-  /** Farm roads & inter-row paths — cool gray, distinct from every soil class */
-  soilPath: new THREE.MeshLambertMaterial({ map: PATH_TEX, color: 0x9ca3af }),
+  /** Farm roads between fields only — natural track, not soil-class colours */
+  soilPath: new THREE.MeshLambertMaterial({ map: PATH_TEX, color: 0x9a958c }),
   grassEdge: new THREE.MeshLambertMaterial({ color: 0x5a8f3e }),
   trunk: new THREE.MeshLambertMaterial({ color: 0x6b4423 }),
   leaf: new THREE.MeshLambertMaterial({ color: 0x3d9e4a, side: THREE.DoubleSide }),
@@ -716,6 +761,8 @@ function createFarmAudio() {
   let roverGain: GainNode | null = null;
   let cattleTimer: number | null = null;
   let started = false;
+  /** Master mute — blocks rover hum AND cattle moos */
+  let muted = true;
 
   const startRoverHum = () => {
     if (roverOsc) return;
@@ -726,7 +773,7 @@ function createFarmAudio() {
     filter.frequency.value = 400;
     roverOsc.type = 'sawtooth';
     roverOsc.frequency.value = 55;
-    roverGain.gain.value = 0.09;
+    roverGain.gain.value = muted ? 0 : 0.09;
     roverOsc.connect(filter);
     filter.connect(roverGain);
     roverGain.connect(ctx.destination);
@@ -744,7 +791,7 @@ function createFarmAudio() {
   };
 
   const playMoo = () => {
-    if (ctx.state === 'closed') return;
+    if (muted || ctx.state === 'closed') return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
@@ -772,19 +819,41 @@ function createFarmAudio() {
         started = true;
         startRoverHum();
         cattleTimer = window.setInterval(() => {
-          if (Math.random() > 0.2) playMoo();
+          if (!muted && Math.random() > 0.2) playMoo();
         }, 4500 + Math.random() * 3500);
-        // first moo shortly after enable
-        window.setTimeout(() => playMoo(), 800);
-        window.setTimeout(() => playMoo(), 2200);
+        // first moos only if unmuted
+        window.setTimeout(() => {
+          if (!muted) playMoo();
+        }, 800);
+        window.setTimeout(() => {
+          if (!muted) playMoo();
+        }, 2200);
       }
     },
-    setMuted: (muted: boolean) => {
+    setMuted: (next: boolean) => {
+      muted = next;
       if (roverGain) roverGain.gain.value = muted ? 0 : 0.09;
+      // Soft-suspend audio graph when fully muted so nothing leaks
+      if (muted && ctx.state === 'running') {
+        try {
+          void ctx.suspend();
+        } catch {
+          /* ignore */
+        }
+      } else if (!muted && ctx.state === 'suspended') {
+        try {
+          void ctx.resume();
+        } catch {
+          /* ignore */
+        }
+      }
     },
     dispose: () => {
       stopRoverHum();
-      if (cattleTimer) window.clearInterval(cattleTimer);
+      if (cattleTimer) {
+        window.clearInterval(cattleTimer);
+        cattleTimer = null;
+      }
       try {
         ctx.close();
       } catch {
@@ -797,9 +866,13 @@ function createFarmAudio() {
 export default function DigitalTwinMap({
   sim, setSim, isPlaying, setIsPlaying, level, setLevel,
   selectedField, setSelectedField, mode, setMode,
-  fieldSoilMap, setFieldSoil,
-  fieldVarietyMap, setFieldVariety,
+  fieldSoilMap,
+  fieldVarietyMap,
+  fields: fieldsProp,
+  showGrapeVines = true,
 }: Props) {
+  const fields = fieldsProp && fieldsProp.length ? fieldsProp : FIELDS;
+  const getField = (id: string) => getFieldFrom(fields, id);
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -989,7 +1062,7 @@ export default function DigitalTwinMap({
     const motors: THREE.Group[] = [];
     const bees: THREE.Group[] = [];
     const fieldPads: Record<string, THREE.Mesh[]> = {};
-    FIELDS.forEach((f) => {
+    fields.forEach((f) => {
       const soilId = (fieldSoilMap[f.id] || 'alluvial') as SoilClassId;
       const sm = SOIL_MATS[soilId] || SOIL_MATS.alluvial;
       fieldPads[f.id] = [];
@@ -999,20 +1072,12 @@ export default function DigitalTwinMap({
         new THREE.BoxGeometry(f.w, 0.08, f.d),
         sm.pad
       );
-      pad.position.set(f.x, 0.04, f.z);
+      pad.position.set(f.x, 0.08, f.z);
       pad.userData.fieldId = f.id;
       pad.userData.isFieldPad = true;
       pad.userData.soilMesh = true;
       farmGroup.add(pad);
       fieldPads[f.id].push(pad);
-
-      // Center service path — cool gray gravel (MAT.soilPath), never a soil color
-      const centerPath = new THREE.Mesh(
-        new THREE.BoxGeometry(1.4, 0.03, f.d - 0.5),
-        MAT.soilPath
-      );
-      centerPath.position.set(f.x, 0.09, f.z);
-      farmGroup.add(centerPath);
 
       // Small hydrogels — scale driven later by weather / saturation
       for (let i = 0; i < 6; i++) {
@@ -1116,17 +1181,79 @@ export default function DigitalTwinMap({
       motors.push(motor);
     });
 
-    // Main farm roads — warm packed earth
-    const path1 = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.04, 52), MAT.soilPath);
-    path1.position.set(0, 0.06, 0);
-    farmGroup.add(path1);
-    const path2 = new THREE.Mesh(new THREE.BoxGeometry(52, 0.04, 2.8), MAT.soilPath);
-    path2.position.set(0, 0.06, 0);
-    farmGroup.add(path2);
+    // Farm roads ONLY in gaps between field pads — never through pad centers
+    {
+      const nFields = fields.length;
+      const xs = fields.map((f) => f.x);
+      const zs = fields.map((f) => f.z);
+      const halfW = fields.map((f) => f.w / 2);
+      const halfD = fields.map((f) => f.d / 2);
+      const minX = Math.min(...xs.map((x, i) => x - halfW[i]));
+      const maxX = Math.max(...xs.map((x, i) => x + halfW[i]));
+      const minZ = Math.min(...zs.map((z, i) => z - halfD[i]));
+      const maxZ = Math.max(...zs.map((z, i) => z + halfD[i]));
+      const spanX = Math.max(8, maxX - minX);
+      const spanZ = Math.max(8, maxZ - minZ);
+      const midX = (minX + maxX) / 2;
+      const midZ = (minZ + maxZ) / 2;
+
+      // Road width must fit inside inter-pad gap (buildDynamicFields uses gap ≈ 4)
+      const colXs = [...new Set(fields.map((f) => Math.round(f.x * 100) / 100))].sort((a, b) => a - b);
+      const rowZs = [...new Set(fields.map((f) => Math.round(f.z * 100) / 100))].sort((a, b) => a - b);
+      let gapX = 4;
+      if (colXs.length >= 2) {
+        const left = fields.find((f) => Math.round(f.x * 100) / 100 === colXs[0]);
+        const right = fields.find((f) => Math.round(f.x * 100) / 100 === colXs[1]);
+        if (left && right) {
+          gapX = (right.x - right.w / 2) - (left.x + left.w / 2);
+        }
+      }
+      let gapZ = 4;
+      if (rowZs.length >= 2) {
+        const top = fields.find((f) => Math.round(f.z * 100) / 100 === rowZs[0]);
+        const bot = fields.find((f) => Math.round(f.z * 100) / 100 === rowZs[1]);
+        if (top && bot) {
+          gapZ = (bot.z - bot.d / 2) - (top.z + top.d / 2);
+        }
+      }
+      const roadW = Math.max(1.2, Math.min(2.2, Math.min(gapX, gapZ) * 0.55));
+
+      // Vertical corridors ONLY between columns (no outer ring roads)
+      const vLines: number[] = [];
+      for (let i = 0; i < colXs.length - 1; i++) {
+        vLines.push((colXs[i] + colXs[i + 1]) / 2);
+      }
+
+      // Horizontal corridors ONLY between rows (no outer ring roads)
+      const hLines: number[] = [];
+      for (let i = 0; i < rowZs.length - 1; i++) {
+        hLines.push((rowZs[i] + rowZs[i + 1]) / 2);
+      }
+
+      vLines.forEach((x) => {
+        const path = new THREE.Mesh(
+          new THREE.BoxGeometry(roadW, 0.035, spanZ + roadW * 1.5),
+          MAT.soilPath,
+        );
+        path.position.set(x, 0.05, midZ);
+        path.userData.isFarmPath = true;
+        farmGroup.add(path);
+      });
+
+      hLines.forEach((z) => {
+        const path = new THREE.Mesh(
+          new THREE.BoxGeometry(spanX + roadW * 1.5, 0.035, roadW),
+          MAT.soilPath,
+        );
+        path.position.set(midX, 0.05, z);
+        path.userData.isFarmPath = true;
+        farmGroup.add(path);
+      });
+    }
 
     // One rover per field — patrols inside that field only
     const rovers: THREE.Group[] = [];
-    FIELDS.forEach((f, i) => {
+    fields.forEach((f, i) => {
       const rover = makeRover();
       const margin = 2.2;
       const halfW = f.w / 2 - margin;
@@ -1143,7 +1270,7 @@ export default function DigitalTwinMap({
       rovers.push(rover);
     });
     // Extra rover in largest fields (A & B) for coverage
-    ;[FIELDS[0], FIELDS[1]].forEach((f, i) => {
+    ;[fields[0], fields[1]].filter(Boolean).forEach((f, i) => {
       const rover = makeRover();
       const margin = 2.2;
       const halfW = f.w / 2 - margin;
@@ -2028,7 +2155,7 @@ export default function DigitalTwinMap({
           {/* Field pick overlay on farm */}
           {level === 'farm' && (
             <div className="absolute inset-0 pointer-events-none">
-              {FIELDS.map((f) => {
+              {fields.map((f) => {
                 const sid = fieldSoilMap[f.id] || 'alluvial';
                 const sc = getSoilClass(sid);
                 const vv = getGrapeVariety(fieldVarietyMap[f.id] || 'thompson');
@@ -2059,7 +2186,7 @@ export default function DigitalTwinMap({
           )}
           <div className="absolute bottom-3 left-3 bg-black/55 rounded-lg px-3 py-1.5 text-[10px] text-slate-300 pointer-events-none">
             <div className="flex items-center gap-2 flex-wrap">
-              {FIELDS.map((f) => {
+              {fields.map((f) => {
                 const sc = getSoilClass(fieldSoilMap[f.id] || 'alluvial');
                 return (
                   <span key={f.id} className="inline-flex items-center gap-1">
@@ -2068,7 +2195,7 @@ export default function DigitalTwinMap({
                   </span>
                 );
               })}
-              <span className="text-slate-500">· paths gray gravel · {sim.timeOfDay}</span>
+              <span className="text-slate-500">· dirt tracks between fields · {sim.timeOfDay}</span>
             </div>
           </div>
         </div>
@@ -2097,55 +2224,25 @@ export default function DigitalTwinMap({
                   Soil & variety by field
                 </div>
                 <p className="text-[9px] text-slate-500 mb-2">
-                  Set soil per field; AI ranks varieties for that soil. Paths stay cool gray gravel.
+                  Configured in Settings. Paths stay cool gray gravel.
                 </p>
-                <div className="space-y-2.5">
-                  {FIELDS.map((f) => {
+                <div className="space-y-2">
+                  {fields.map((f) => {
                     const sid = fieldSoilMap[f.id] || 'alluvial';
                     const sc = getSoilClass(sid);
                     const vid = fieldVarietyMap[f.id] || 'thompson';
                     const vv = getGrapeVariety(vid);
-                    const top = recommendVarietiesForSoil(sid)[0];
                     return (
                       <div key={f.id} className="rounded-lg border border-[#1e2d40] bg-[#0b131e] p-2">
-                        <div className="flex items-center justify-between gap-1 mb-1">
+                        <div className="flex items-center justify-between gap-1 mb-0.5">
                           <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
                             <span className="w-2.5 h-2.5 rounded-sm border border-white/20" style={{ background: sc.base }} />
                             {f.name}
                           </span>
                           <span className="text-[9px] text-slate-400">{sc.shortLabel}</span>
                         </div>
-                        <div className="flex flex-wrap gap-1 mb-1.5">
-                          {SOIL_CLASSES.map((s) => (
-                            <button
-                              key={s.id}
-                              type="button"
-                              title={s.label}
-                              onClick={() => setFieldSoil(f.id, s.id)}
-                              className={`w-5 h-5 rounded border transition ${
-                                sid === s.id
-                                  ? 'border-white ring-1 ring-emerald-400 scale-110'
-                                  : 'border-black/40 opacity-75 hover:opacity-100'
-                              }`}
-                              style={{ background: s.base }}
-                            />
-                          ))}
-                        </div>
-                        <div className="text-[9px] text-slate-500 mb-1">Variety</div>
-                        <select
-                          value={vid}
-                          onChange={(e) => setFieldVariety(f.id, e.target.value as GrapeVarietyId)}
-                          className="w-full text-[10px] rounded-md bg-[#16202d] border border-[#1e2d40] text-slate-200 px-1.5 py-1 mb-1"
-                        >
-                          {GRAPE_VARIETIES.map((v) => (
-                            <option key={v.id} value={v.id}>{v.label}</option>
-                          ))}
-                        </select>
                         <div className="text-[9px] text-slate-400 leading-snug">
-                          Selected: <span className="text-white font-semibold">{vv.label}</span>
-                          {top && (
-                            <> · Suggest: <span className="text-emerald-300 font-semibold">{top.variety.label}</span> ({top.fit})</>
-                          )}
+                          {vv.label}
                         </div>
                       </div>
                     );
@@ -2168,74 +2265,9 @@ export default function DigitalTwinMap({
                 value={`${activeVarietyFit} (${activeVarietyScore})`}
                 accent={activeVarietyFit === 'Best' || activeVarietyFit === 'Good'}
               />
-
-              <div className="rounded-lg border border-[#1e2d40] bg-[#0b131e] p-2">
-                <div className="text-[9px] text-slate-500 mb-1.5">Set soil for {field.name}</div>
-                <div className="grid grid-cols-1 gap-1">
-                  {SOIL_CLASSES.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => setFieldSoil(selectedField, s.id)}
-                      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 border text-left transition ${
-                        activeSoilId === s.id
-                          ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
-                          : 'border-[#1e2d40] bg-[#16202d] text-slate-400 hover:border-slate-600'
-                      }`}
-                    >
-                      <span className="w-3.5 h-3.5 rounded-sm shrink-0 border border-black/30" style={{ background: s.base }} />
-                      <span className="text-[10px] font-semibold leading-tight">{s.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-violet-500/30 bg-[#0b131e] p-2">
-                <div className="text-[9px] text-slate-500 mb-1.5 font-semibold uppercase tracking-wide">
-                  Grape variety · {field.name}
-                </div>
-                <div className="grid grid-cols-1 gap-1 mb-2">
-                  {GRAPE_VARIETIES.map((v) => {
-                    const score = v.soilScore[activeSoilId as SoilClassId] ?? 50;
-                    const fit = varietyFitLevel(score);
-                    const on = activeVarietyId === v.id;
-                    return (
-                      <button
-                        key={v.id}
-                        type="button"
-                        onClick={() => setFieldVariety(selectedField, v.id)}
-                        className={`flex items-center gap-2 rounded-lg px-2 py-1.5 border text-left transition ${
-                          on
-                            ? 'border-violet-400/50 bg-violet-500/15 text-violet-100'
-                            : 'border-[#1e2d40] bg-[#16202d] text-slate-400 hover:border-slate-600'
-                        }`}
-                      >
-                        <span className={`text-[9px] font-bold w-9 shrink-0 ${
-                          fit === 'Best' ? 'text-emerald-400' : fit === 'Good' ? 'text-lime-400' : fit === 'Fair' ? 'text-amber-400' : 'text-rose-400'
-                        }`}>{fit}</span>
-                        <span className="text-[10px] font-semibold leading-tight flex-1">{v.label}</span>
-                        <span className="text-[9px] text-slate-500">{score}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="text-[9px] text-slate-500 mb-1 font-semibold uppercase">AI pick for {activeSoil.shortLabel}</div>
-                <div className="space-y-1">
-                  {soilRecommendations.slice(0, 3).map((r, i) => (
-                    <button
-                      key={r.variety.id}
-                      type="button"
-                      onClick={() => setFieldVariety(selectedField, r.variety.id)}
-                      className="w-full flex items-center gap-2 rounded-md px-2 py-1 border border-[#1e2d40] bg-[#16202d] hover:border-emerald-500/40 text-left"
-                    >
-                      <span className="text-[9px] font-bold text-emerald-400 w-4">{i + 1}</span>
-                      <span className="text-[10px] text-white font-semibold flex-1">{r.variety.label}</span>
-                      <span className="text-[9px] text-slate-400">{r.fit} · {r.score}</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[9px] text-slate-500 mt-1.5 leading-snug">{activeVariety.notes}</p>
-              </div>
+              <p className="text-[9px] text-slate-500 leading-snug">
+                Soil & variety are set in Settings. Twin visuals update from those choices.
+              </p>
 
               <Row label="Soil Moisture" value={`${field.soilMoisture}%`} />
               <Row label="Row Spacing" value={field.rowSpacing} />
@@ -2256,19 +2288,10 @@ export default function DigitalTwinMap({
                 value={`${activeVarietyFit} (${activeVarietyScore})`}
                 accent={activeVarietyFit === 'Best' || activeVarietyFit === 'Good'}
               />
-              <div className="rounded-lg border border-[#1e2d40] bg-[#0b131e] p-2">
-                <div className="text-[9px] text-slate-500 mb-1">Change variety</div>
-                <select
-                  value={activeVarietyId}
-                  onChange={(e) => setFieldVariety(selectedField, e.target.value as GrapeVarietyId)}
-                  className="w-full text-[10px] rounded-md bg-[#16202d] border border-[#1e2d40] text-slate-200 px-1.5 py-1"
-                >
-                  {GRAPE_VARIETIES.map((v) => (
-                    <option key={v.id} value={v.id}>{v.label}</option>
-                  ))}
-                </select>
-                <p className="text-[9px] text-slate-500 mt-1.5 leading-snug">{activeVariety.notes}</p>
-              </div>
+              <p className="text-[9px] text-slate-500 leading-snug">{activeVariety.notes}</p>
+              <p className="text-[9px] text-slate-500 leading-snug">
+                Change soil & variety in Settings.
+              </p>
               <Row label="Plant Age" value={`${sim.day} Days`} />
               <Row label="Stage" value={stageMeta.label} />
               {sim.stage === 'flowering' && (
@@ -2297,25 +2320,12 @@ export default function DigitalTwinMap({
                 <div className="text-[10px] text-slate-500 mb-1.5 font-semibold uppercase tracking-wide">
                   Soil type · {field.name}
                 </div>
-                <div className="grid grid-cols-1 gap-1">
-                  {SOIL_CLASSES.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => setFieldSoil(selectedField, s.id)}
-                      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 border text-left transition ${
-                        activeSoilId === s.id
-                          ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
-                          : 'border-[#1e2d40] bg-[#16202d] text-slate-400 hover:border-slate-600'
-                      }`}
-                    >
-                      <span
-                        className="w-3.5 h-3.5 rounded-sm shrink-0 border border-black/30"
-                        style={{ background: s.base }}
-                      />
-                      <span className="text-[10px] font-semibold leading-tight">{s.label}</span>
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5">
+                  <span
+                    className="w-3.5 h-3.5 rounded-sm shrink-0 border border-black/30"
+                    style={{ background: activeSoil.base }}
+                  />
+                  <span className="text-[10px] font-semibold text-emerald-100">{activeSoil.label}</span>
                 </div>
               </div>
               {(() => {
@@ -2344,20 +2354,18 @@ export default function DigitalTwinMap({
                 />
                 <div className="text-[9px] text-slate-500 mt-1.5 mb-1">Recommended for {activeSoil.shortLabel}</div>
                 {soilRecommendations.slice(0, 3).map((r, i) => (
-                  <button
+                  <div
                     key={r.variety.id}
-                    type="button"
-                    onClick={() => setFieldVariety(selectedField, r.variety.id)}
-                    className={`w-full flex items-center gap-1.5 rounded-md px-1.5 py-1 mb-0.5 border text-left ${
+                    className={`w-full flex items-center gap-1.5 rounded-md px-1.5 py-1 mb-0.5 border ${
                       activeVarietyId === r.variety.id
                         ? 'border-violet-400/40 bg-violet-500/10'
-                        : 'border-[#1e2d40] bg-[#16202d] hover:border-emerald-500/30'
+                        : 'border-[#1e2d40] bg-[#16202d]'
                     }`}
                   >
                     <span className="text-[9px] text-emerald-400 font-bold w-3">{i + 1}</span>
                     <span className="text-[10px] text-white font-semibold flex-1">{r.variety.label}</span>
                     <span className="text-[9px] text-slate-400">{r.fit}</span>
-                  </button>
+                  </div>
                 ))}
               </div>
               <Row label="Soil Moisture" value={`${sim.env.soilMoisture.toFixed(0)}%`} />
@@ -2368,7 +2376,7 @@ export default function DigitalTwinMap({
               <Row label="Mulch Cover" value={`${sim.mulchCoverage}%`} />
               <Row label="Weather" value={sim.weather} />
               <p className="text-[10px] text-slate-500 pt-1">
-                Soil color & variety recommendations follow the field you select. Mulch is uniform grey.
+                Soil & variety are configured in Settings. Twin colours follow those choices. Mulch is uniform grey.
               </p>
             </div>
           )}
@@ -2390,7 +2398,7 @@ export default function DigitalTwinMap({
             <div className="pt-2 border-t border-[#1e2d40]">
               <div className="text-[10px] text-slate-500 mb-2">Switch Field</div>
               <div className="grid grid-cols-2 gap-1">
-                {FIELDS.map((f) => (
+                {fields.map((f) => (
                   <button key={f.id} type="button" onClick={() => setSelectedField(f.id)}
                     className={`text-[10px] rounded-lg px-2 py-1.5 border ${selectedField === f.id ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300' : 'border-[#1e2d40] text-slate-400'}`}>
                     {f.name}

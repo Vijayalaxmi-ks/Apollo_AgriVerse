@@ -1,10 +1,12 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import * as THREE from 'three';
 import {
   Droplets, Beaker, Activity, Waves, Hexagon, Leaf, AlertTriangle,
   Info, Thermometer, FlaskConical, Sparkles, RotateCcw, Check,
 } from 'lucide-react';
 import type { SimState, SoilClassId } from './simulation';
-import { FIELDS, SOIL_CLASSES, getSoilClass } from './simulation';
+import { useFarmOptional } from './context/FarmContext';
+import { FIELDS, SOIL_CLASSES, getSoilClass, type FieldInfo } from './simulation';
 
 type FormulaKey = 'pam' | 'cellulose' | 'kpa' | 'crosslink' | 'other';
 type Formula = Record<FormulaKey, number>;
@@ -98,10 +100,10 @@ type ZoneRow = {
   health: 'Good' | 'Moderate' | 'Low';
 };
 
-function buildZones(sim: SimState): ZoneRow[] {
+function buildZones(sim: SimState, fields: FieldInfo[] = FIELDS): ZoneRow[] {
   const base = sim.env.hydrogelSat;
   const eff = sim.hydrogelEfficiency;
-  return FIELDS.map((f, i) => {
+  return fields.map((f, i) => {
     const offset = [6, 10, -4, -16][i] ?? 0;
     const sat = Math.max(22, Math.min(92, Math.round(base + offset + (f.soilMoisture - 60) * 0.12)));
     const efficiency = Math.max(38, Math.min(92, Math.round(eff + offset * 0.35)));
@@ -158,40 +160,286 @@ function LineChart({
   );
 }
 
-function HydrogelSphere({ sat }: { sat: number }) {
+/**
+ * 3D soil cutaway matching Digital Twin "Soil & Hydrogels" view:
+ * open front soil volume, roots, and glass hydrogel bubbles that swell with saturation.
+ */
+function HydrogelSoilCutaway({
+  sat,
+  soilId,
+  moisture,
+}: {
+  sat: number;
+  soilId: SoilClassId;
+  moisture: number;
+}) {
+  const mountRef = useRef<HTMLDivElement>(null);
+  const gelsRef = useRef<THREE.Mesh[]>([]);
+  const soilMatsRef = useRef<{ dark?: THREE.MeshLambertMaterial; mid?: THREE.MeshLambertMaterial; fill?: THREE.MeshStandardMaterial }>({});
+  const frameRef = useRef(0);
+
+  // Build / teardown scene once
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el) return;
+
+    const w = el.clientWidth || 220;
+    const h = el.clientHeight || 200;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b131e);
+
+    const camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 50);
+    camera.position.set(2.8, 0.6, 4.2);
+    camera.lookAt(0, -0.9, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(w, h);
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.borderRadius = '12px';
+    el.appendChild(renderer.domElement);
+
+    const amb = new THREE.AmbientLight(0xb0c4de, 0.75);
+    scene.add(amb);
+    const key = new THREE.DirectionalLight(0xfff5e6, 0.95);
+    key.position.set(3, 5, 4);
+    scene.add(key);
+    const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
+    fill.position.set(-3, 2, -2);
+    scene.add(fill);
+
+    const soilGroup = new THREE.Group();
+    scene.add(soilGroup);
+
+    const sc = getSoilClass(soilId);
+    const soilMatDark = new THREE.MeshLambertMaterial({ color: new THREE.Color(sc.dark) });
+    const soilMatMid = new THREE.MeshLambertMaterial({ color: new THREE.Color(sc.base) });
+    const soilFillMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(sc.light),
+      transparent: true,
+      opacity: 0.2,
+      depthWrite: false,
+    });
+    soilMatsRef.current = { dark: soilMatDark, mid: soilMatMid, fill: soilFillMat };
+
+    // Cutaway box (same layout idea as DigitalTwinMap soil level)
+    const soilBack = new THREE.Mesh(new THREE.BoxGeometry(4.4, 2.8, 0.2), soilMatDark);
+    soilBack.position.set(0, -1.1, -2.1);
+    soilGroup.add(soilBack);
+    const soilLeft = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.8, 4.2), soilMatDark);
+    soilLeft.position.set(-2.15, -1.1, 0);
+    soilGroup.add(soilLeft);
+    const soilRight = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.8, 4.2), soilMatMid);
+    soilRight.position.set(2.15, -1.1, 0);
+    soilGroup.add(soilRight);
+    const soilFloor = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.2, 4.2), soilMatDark);
+    soilFloor.position.set(0, -2.45, 0);
+    soilGroup.add(soilFloor);
+    const soilFill = new THREE.Mesh(new THREE.BoxGeometry(4.0, 2.5, 3.9), soilFillMat);
+    soilFill.position.set(0, -1.2, 0.05);
+    soilGroup.add(soilFill);
+
+    // Mulch strip (rear half + cut edge)
+    const mulchMat = new THREE.MeshLambertMaterial({ color: 0x6b7280 });
+    const mulchTop = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.1, 2.2), mulchMat);
+    mulchTop.position.set(0, 0.22, -0.95);
+    soilGroup.add(mulchTop);
+    const cutEdge = new THREE.Mesh(
+      new THREE.BoxGeometry(4.2, 0.28, 0.07),
+      new THREE.MeshStandardMaterial({ color: 0x6b4423 }),
+    );
+    cutEdge.position.set(0, 0.02, 0.35);
+    soilGroup.add(cutEdge);
+
+    // Crown / stem stub at surface
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.09, 0.35, 8),
+      new THREE.MeshLambertMaterial({ color: 0x5d4037 }),
+    );
+    stem.position.set(0, 0.28, 0);
+    soilGroup.add(stem);
+    const leafL = new THREE.Mesh(
+      new THREE.SphereGeometry(0.14, 8, 6),
+      new THREE.MeshLambertMaterial({ color: 0x3d9e4a }),
+    );
+    leafL.scale.set(1.4, 0.35, 0.9);
+    leafL.position.set(-0.18, 0.48, 0.05);
+    leafL.rotation.z = 0.4;
+    soilGroup.add(leafL);
+    const leafR = leafL.clone();
+    leafR.position.set(0.18, 0.5, -0.04);
+    leafR.rotation.z = -0.35;
+    soilGroup.add(leafR);
+
+    // Hydrogel material (glass bubble — matches twin)
+    const gelMat = new THREE.MeshLambertMaterial({
+      color: 0x7c3aed,
+      transparent: true,
+      opacity: 0.72,
+      emissive: 0x4c1d95,
+      emissiveIntensity: 0.25,
+    });
+    const gelGeo = new THREE.SphereGeometry(1, 10, 10);
+    const hydrogels: THREE.Mesh[] = [];
+
+    const rootMat = new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 0.65 });
+    const origin = new THREE.Vector3(0, 0.08, 0);
+
+    const addRootWithBubbles = (
+      from: THREE.Vector3,
+      to: THREE.Vector3,
+      radius = 0.028,
+      bubbleCount = 4,
+    ) => {
+      const dir = new THREE.Vector3().subVectors(to, from);
+      const len = dir.length();
+      if (len < 0.05) return;
+      const root = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius * 0.7, radius, len, 6),
+        rootMat,
+      );
+      root.position.copy(from.clone().add(to).multiplyScalar(0.5));
+      root.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+      soilGroup.add(root);
+
+      for (let k = 0; k < bubbleCount; k++) {
+        const t = (k + 0.55) / (bubbleCount + 0.2);
+        const pos = from.clone().lerp(to, t);
+        const side = new THREE.Vector3(dir.z, 0, -dir.x);
+        if (side.lengthSq() < 0.001) side.set(1, 0, 0);
+        side.normalize();
+        pos.addScaledVector(side, radius * 1.7 * (k % 2 === 0 ? 1 : -1));
+        const gel = new THREE.Mesh(gelGeo, gelMat.clone());
+        const base = 0.04 + Math.random() * 0.022;
+        gel.scale.setScalar(base);
+        gel.position.copy(pos);
+        gel.userData.baseScale = base;
+        soilGroup.add(gel);
+        hydrogels.push(gel);
+      }
+    };
+
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + 0.15;
+      const mid = new THREE.Vector3(
+        Math.cos(a) * (0.55 + (i % 3) * 0.14),
+        -0.65 - (i % 3) * 0.1,
+        Math.sin(a) * (0.5 + (i % 3) * 0.12),
+      );
+      const tip = new THREE.Vector3(
+        Math.cos(a) * (1.25 + (i % 4) * 0.18),
+        -1.55 - (i % 3) * 0.22,
+        Math.sin(a) * (1.15 + (i % 4) * 0.15),
+      );
+      addRootWithBubbles(origin, mid, 0.032, 3);
+      addRootWithBubbles(mid, tip, 0.022, 3);
+    }
+    // a few deeper laterals
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + 0.4;
+      const deep = new THREE.Vector3(Math.cos(a) * 0.9, -2.05, Math.sin(a) * 0.85);
+      addRootWithBubbles(origin.clone().setY(-0.4), deep, 0.02, 4);
+    }
+
+    gelsRef.current = hydrogels;
+
+    let running = true;
+    const clock = new THREE.Clock();
+    const animate = () => {
+      if (!running) return;
+      frameRef.current = requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+      soilGroup.rotation.y = Math.sin(t * 0.22) * 0.18;
+      // gentle pulse on gels
+      hydrogels.forEach((g, i) => {
+        if (i % 2 !== 0) return;
+        const base = (g.userData.baseScale as number) || 0.05;
+        const pulse = 1 + Math.sin(t * 2.2 + i) * 0.06;
+        g.scale.setScalar(base * pulse);
+      });
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    const onResize = () => {
+      if (!mountRef.current) return;
+      const nw = mountRef.current.clientWidth || w;
+      const nh = mountRef.current.clientHeight || h;
+      camera.aspect = nw / nh;
+      camera.updateProjectionMatrix();
+      renderer.setSize(nw, nh);
+    };
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      running = false;
+      cancelAnimationFrame(frameRef.current);
+      window.removeEventListener('resize', onResize);
+      gelsRef.current = [];
+      renderer.dispose();
+      gelGeo.dispose();
+      gelMat.dispose();
+      rootMat.dispose();
+      soilMatDark.dispose();
+      soilMatMid.dispose();
+      soilFillMat.dispose();
+      mulchMat.dispose();
+      if (renderer.domElement.parentElement === el) {
+        el.removeChild(renderer.domElement);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Update gel scale from saturation (same idea as DigitalTwinMap)
+  useEffect(() => {
+    const sat01 = Math.max(0, Math.min(1, sat / 100));
+    const gelScale = 0.55 + sat01 * 1.35;
+    gelsRef.current.forEach((g) => {
+      const base = 0.038 + sat01 * 0.04;
+      g.userData.baseScale = base * gelScale * 0.55;
+      g.scale.setScalar(g.userData.baseScale as number);
+      const mat = g.material as THREE.MeshLambertMaterial;
+      if (mat && mat.opacity !== undefined) {
+        mat.opacity = 0.55 + sat01 * 0.35;
+        mat.emissiveIntensity = 0.15 + sat01 * 0.35;
+      }
+    });
+  }, [sat]);
+
+  // Soil colour when class changes
+  useEffect(() => {
+    const sc = getSoilClass(soilId);
+    const { dark, mid, fill } = soilMatsRef.current;
+    if (dark) dark.color.set(sc.dark);
+    if (mid) mid.color.set(sc.base);
+    if (fill) fill.color.set(sc.light);
+  }, [soilId]);
+
   return (
-    <div className="relative mx-auto w-[160px] h-[160px] lg:w-[180px] lg:h-[180px]">
-      <div className="absolute inset-4 rounded-full bg-violet-600/20 blur-xl pointer-events-none" />
-      <svg viewBox="0 0 200 200" className="w-full h-full relative z-10">
-        <defs>
-          <radialGradient id="hgOrb" cx="38%" cy="32%" r="62%">
-            <stop offset="0%" stopColor="#c4b5fd" stopOpacity="0.45" />
-            <stop offset="50%" stopColor="#6366f1" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0.12" />
-          </radialGradient>
-        </defs>
-        <circle cx="100" cy="108" r="70" fill="url(#hgOrb)" stroke="#8b5cf6" strokeWidth="1.5" />
-        {[
-          [100, 45], [58, 72], [142, 72], [48, 115], [152, 115], [72, 152], [128, 152], [100, 108],
-          [78, 58], [122, 58], [65, 100], [135, 100], [88, 135], [112, 135],
-        ].map(([cx, cy], i) => (
-          <circle key={i} cx={cx} cy={cy} r={i === 7 ? 5 : 3} fill={i === 7 ? '#22d3ee' : '#a78bfa'} />
-        ))}
-        <g stroke="#67e8f9" strokeWidth="0.9" opacity="0.55">
-          <line x1="100" y1="45" x2="58" y2="72" /><line x1="100" y1="45" x2="142" y2="72" />
-          <line x1="58" y1="72" x2="48" y2="115" /><line x1="142" y1="72" x2="152" y2="115" />
-          <line x1="48" y1="115" x2="72" y2="152" /><line x1="152" y1="115" x2="128" y2="152" />
-          <line x1="72" y1="152" x2="128" y2="152" />
-          <line x1="100" y1="45" x2="100" y2="108" /><line x1="58" y1="72" x2="100" y2="108" />
-          <line x1="142" y1="72" x2="100" y2="108" /><line x1="48" y1="115" x2="100" y2="108" />
-          <line x1="152" y1="115" x2="100" y2="108" />
-        </g>
-        <path d="M100 42 Q97 28 94 20" stroke="#4ade80" strokeWidth="2.2" fill="none" />
-        <ellipse cx="87" cy="20" rx="10" ry="5" fill="#4ade80" transform="rotate(-28 87 20)" />
-        <ellipse cx="110" cy="18" rx="10" ry="5" fill="#86efac" transform="rotate(22 110 18)" />
-      </svg>
-      <div className="absolute bottom-0 left-0 right-0 text-center text-[9px] text-cyan-300/90 leading-tight">
-        Controlled Release to Root Zone · {sat}%
+    <div className="relative w-full min-h-[200px] h-[220px] lg:h-[240px] rounded-xl overflow-hidden border border-[#1e2d40] bg-[#0b131e]">
+      <div ref={mountRef} className="absolute inset-0" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0b131e]/95 via-[#0b131e]/50 to-transparent px-2.5 pb-2 pt-6">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[9px] text-cyan-300/90 font-semibold leading-tight">
+            Soil cutaway · root-zone gels
+          </div>
+          <div className="text-[9px] text-slate-400">
+            Sat <span className="text-violet-300 font-bold">{sat}%</span>
+            <span className="mx-1 text-slate-600">·</span>
+            SM <span className="text-emerald-300 font-bold">{moisture}%</span>
+          </div>
+        </div>
+        <div className="text-[8px] text-slate-500 mt-0.5">
+          Same hydrogel bubbles as Digital Twin → Soil & Hydrogels
+        </div>
+      </div>
+      <div className="pointer-events-none absolute top-2 left-2 flex items-center gap-1 rounded-md border border-violet-500/30 bg-violet-500/15 px-1.5 py-0.5">
+        <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+        <span className="text-[8px] font-bold uppercase tracking-wider text-violet-200">Live 3D</span>
       </div>
     </div>
   );
@@ -218,6 +466,9 @@ export default function HydrogelPanel({
   const [formula, setFormula] = useState<Formula>({ ...DEFAULT_FORMULA });
   const [appliedPreset, setAppliedPreset] = useState('balanced');
   const [formulaOpen, setFormulaOpen] = useState(true);
+  const farmCtx = useFarmOptional();
+  const twinGel = farmCtx?.twinState?.hydrogel;
+  const mlTel = farmCtx?.ml?.telemetry;
   const [savedFlash, setSavedFlash] = useState(false);
   const [localSoil, setLocalSoil] = useState<SoilClassId>(soilClass);
 
@@ -277,6 +528,12 @@ export default function HydrogelPanel({
   const fieldRelease = active.releaseRate;
   const fieldAbsorbed = +(fieldRelease * 1.45).toFixed(1);
   const fieldPlants = fieldMeta.plants;
+  const backendGelPct =
+    twinGel?.hydrogel_water_storage_pct ??
+    mlTel?.predicted_required_hydrogel_storage_pct ??
+    null;
+  const backendRelease = twinGel?.hydrogel_release_rate_lhr ?? null;
+
   const fieldAcres = fieldMeta.acres;
   // Active gels scale with field size
   const fieldActiveGels = Math.round(280 + fieldAcres * 95 + fieldSat * 2.2);
@@ -340,6 +597,26 @@ export default function HydrogelPanel({
               <span className="text-violet-300 font-semibold">{active.name}</span>
               {' '}· Farm avg sat {farmAvgSat}%
             </p>
+            {(backendGelPct != null || backendRelease != null) && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-violet-100/90">
+                <span className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 font-semibold text-violet-200">
+                  Backend twin / ML
+                </span>
+                {backendGelPct != null && (
+                  <span>Storage <strong>{Number(backendGelPct).toFixed(0)}%</strong></span>
+                )}
+                {backendRelease != null && (
+                  <span>Release <strong>{Number(backendRelease).toFixed(2)} L/hr</strong></span>
+                )}
+                <button
+                  type="button"
+                  className="underline text-violet-300 hover:text-violet-100"
+                  onClick={() => void farmCtx?.stepTwinFromLive?.()}
+                >
+                  Step twin → apollo_twin.db
+                </button>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-1">
             {zones.map((z) => (
@@ -480,39 +757,45 @@ export default function HydrogelPanel({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
-          <div className={`${panel} lg:col-span-4 p-3`}>
-            <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
-              <div className="space-y-1.5">
-                {[
-                  { l: 'Water Absorbed', v: `${fieldAbsorbed} mm` },
-                  { l: 'Water Stored', v: `${fieldStored.toLocaleString()} L` },
-                  { l: 'Water Released', v: `${projectedRelease} mm` },
-                  { l: 'Use Efficiency', v: `${projectedEff}%` },
-                ].map((m) => (
-                  <div key={m.l} className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2 py-1.5">
-                    <div className="text-[8px] text-slate-500 leading-none">{m.l}</div>
-                    <div className="text-xs font-semibold text-cyan-300 mt-0.5">{m.v}</div>
-                  </div>
-                ))}
-              </div>
-              <HydrogelSphere sat={fieldSat} />
-              <div className="space-y-1.5">
-                {[
-                  { l: 'Field', v: active.name },
-                  { l: 'Soil Type', v: soilInfo.shortLabel },
-                  { l: 'Soil Moisture', v: `${fieldMeta.soilMoisture}%` },
-                  { l: 'Degradation', v: `${active.health === 'Low' ? 'Elevated' : 'Normal'} (${degradation}%)` },
-                ].map((m) => (
-                  <div key={m.l} className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2 py-1.5">
-                    <div className="text-[8px] text-slate-500 leading-none">{m.l}</div>
-                    <div className="text-[10px] font-semibold text-white mt-0.5 leading-snug">{m.v}</div>
-                  </div>
-                ))}
-              </div>
+          <div className={`${panel} lg:col-span-5 p-3`}>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-[11px] font-bold text-white tracking-wide">ROOT-ZONE HYDROGEL (DIGITAL TWIN VIEW)</h2>
+              <span className="text-[9px] text-violet-300/80">3D cutaway</span>
+            </div>
+            <HydrogelSoilCutaway
+              sat={fieldSat}
+              soilId={activeSoilId}
+              moisture={fieldMeta.soilMoisture}
+            />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-2">
+              {[
+                { l: 'Water Absorbed', v: `${fieldAbsorbed} mm` },
+                { l: 'Water Stored', v: `${fieldStored.toLocaleString()} L` },
+                { l: 'Water Released', v: `${projectedRelease} mm` },
+                { l: 'Use Efficiency', v: `${projectedEff}%` },
+              ].map((m) => (
+                <div key={m.l} className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2 py-1.5">
+                  <div className="text-[8px] text-slate-500 leading-none">{m.l}</div>
+                  <div className="text-xs font-semibold text-cyan-300 mt-0.5">{m.v}</div>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-1.5">
+              {[
+                { l: 'Field', v: active.name },
+                { l: 'Soil Type', v: soilInfo.shortLabel },
+                { l: 'Soil Moisture', v: `${fieldMeta.soilMoisture}%` },
+                { l: 'Degradation', v: `${active.health === 'Low' ? 'Elevated' : 'Normal'} (${degradation}%)` },
+              ].map((m) => (
+                <div key={m.l} className="rounded-lg bg-[#0b131e] border border-[#1e2d40] px-2 py-1.5">
+                  <div className="text-[8px] text-slate-500 leading-none">{m.l}</div>
+                  <div className="text-[10px] font-semibold text-white mt-0.5 leading-snug">{m.v}</div>
+                </div>
+              ))}
             </div>
           </div>
 
-          <div className={`${panel} lg:col-span-4 p-3`}>
+          <div className={`${panel} lg:col-span-3 p-3`}>
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-[11px] font-bold text-white tracking-wide">FIELD HYDROGEL SATURATION MAP</h2>
               <span className="text-[9px] text-slate-500">4 Fields</span>
@@ -539,7 +822,7 @@ export default function HydrogelPanel({
             </div>
           </div>
 
-          <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2">
+          <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2 content-start">
             <div className={`${panel} p-3`}>
               <h2 className="text-[11px] font-bold text-white tracking-wide mb-2">CURRENT HYDROGEL STATUS</h2>
               <div className="flex gap-3 items-start">
