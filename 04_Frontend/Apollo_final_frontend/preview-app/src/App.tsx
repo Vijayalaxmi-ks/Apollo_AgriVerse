@@ -548,26 +548,45 @@ export default function App() {
     const ids = dynamicFields.map((f) => f.id);
     const soils: SoilClassId[] = ['red', 'black', 'alluvial', 'lateritic', 'alkaline'];
     const varieties: GrapeVarietyId[] = ['sharad', 'tas_a_ganesh', 'thompson', 'manjari_naveen', 'manjari_shyama'];
+
     setFieldSoilMap((prev) => {
       const next = { ...prev };
+      let changed = false;
       ids.forEach((id, i) => {
-        if (!next[id]) next[id] = (settings.defaultSoilClass as SoilClassId) || soils[i % soils.length];
+        const value = (settings.defaultSoilClass as SoilClassId) || soils[i % soils.length];
+        if (next[id] !== value) {
+          next[id] = value;
+          changed = true;
+        }
       });
       Object.keys(next).forEach((k) => {
-        if (!ids.includes(k)) delete next[k];
+        if (!ids.includes(k)) {
+          delete next[k];
+          changed = true;
+        }
       });
-      return next;
+      return changed ? next : prev;
     });
+
     setFieldVarietyMap((prev) => {
       const next = { ...prev };
+      let changed = false;
       ids.forEach((id, i) => {
-        if (!next[id]) next[id] = varieties[i % varieties.length];
+        const value = varieties[i % varieties.length];
+        if (next[id] !== value) {
+          next[id] = value;
+          changed = true;
+        }
       });
       Object.keys(next).forEach((k) => {
-        if (!ids.includes(k)) delete next[k];
+        if (!ids.includes(k)) {
+          delete next[k];
+          changed = true;
+        }
       });
-      return next;
+      return changed ? next : prev;
     });
+
     if (!ids.includes(selectedField)) {
       setSelectedField(ids[0] || 'A');
     }

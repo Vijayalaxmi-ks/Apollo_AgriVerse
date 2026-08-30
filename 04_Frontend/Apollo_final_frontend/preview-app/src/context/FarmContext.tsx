@@ -195,7 +195,12 @@ export function FarmProvider({ children }: { children: ReactNode }) {
   }, [farm.city, farm.latitude, farm.longitude, hasLocation]);
 
   const refreshEvaluate = useCallback(async () => {
-    if (!hasIdentity || !hasLocation) {
+    if (!farm.farm_id?.trim() || !farm.region_id?.trim()) {
+      setEvaluateReport(null);
+      setEvaluateError(null);
+      return;
+    }
+    if (!farm.city?.trim() || !Number(farm.latitude) || !Number(farm.longitude)) {
       setEvaluateReport(null);
       setEvaluateError(null);
       return;
@@ -222,7 +227,7 @@ export function FarmProvider({ children }: { children: ReactNode }) {
     } finally {
       setEvaluateLoading(false);
     }
-  }, [farm]);
+  }, [farm.farm_id, farm.region_id, farm.soil_id, farm.water_availability, farm.latitude, farm.longitude, farm.city]);
 
   const refreshMl = useCallback(async () => {
     try {
