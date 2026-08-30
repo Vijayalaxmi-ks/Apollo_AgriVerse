@@ -273,17 +273,19 @@ function NeuralDecor() {
   );
 }
 
-function StageTimeline({ currentId, day, stages }: { currentId: string; day: number; stages?: { id: string; label: string }[] }) {
+function StageTimeline({ currentId, day, stages }: { currentId: string; day: number; stages?: Array<{ id: string; label: string; start?: number; end?: number; emoji?: string }> }) {
   const track = stages && stages.length ? stages : STAGE_RANGES;
   return (
     <div className="w-full">
       <div className="flex items-center gap-0.5">
         {track.map((s, i) => {
           const active = s.id === currentId;
-          const past = day >= s.end;
+          const end = s.end ?? s.start ?? 0;
+          const past = day >= end;
+          const emoji = s.emoji ?? '•';
           return (
             <div key={s.id} className="flex-1 flex flex-col items-center relative">
-              <div className={`text-base mb-0.5 ${active ? 'scale-125' : 'opacity-60'}`}>{s.emoji}</div>
+              <div className={`text-base mb-0.5 ${active ? 'scale-125' : 'opacity-60'}`}>{emoji}</div>
               <div className={`w-full h-1.5 rounded-full ${past || active ? 'bg-fuchsia-500' : 'bg-[#1e2d40]'}`} />
               {i < track.length - 1 && (
                 <div className="absolute top-[22px] right-0 w-1/2 h-1.5 translate-x-1/2 pointer-events-none" />
@@ -425,7 +427,7 @@ const STAGE_DETAILS: StageDetail[] = [
 
 
 /** Phenology stages by primary crop (profile). Grapes use full STAGE_RANGES. */
-function stagesForCrop(cropId: string): { id: string; label: string; startDay: number; endDay: number }[] {
+function stagesForCrop(cropId: string): { id: string; label: string; startDay: number; endDay: number; start: number; end: number; emoji: string }[] {
   const id = (cropId || 'grape').toLowerCase();
   if (id === 'grape' || /vine|raisin/.test(id)) {
     return STAGE_RANGES.map((s) => ({
@@ -433,59 +435,62 @@ function stagesForCrop(cropId: string): { id: string; label: string; startDay: n
       label: s.label,
       startDay: s.start ?? 0,
       endDay: s.end ?? 150,
+      start: s.start ?? 0,
+      end: s.end ?? 150,
+      emoji: s.emoji ?? '•',
     }));
   }
   // Generic agronomic tracks for other Maharashtra crops
-  const tracks: Record<string, { id: string; label: string; startDay: number; endDay: number }[]> = {
+  const tracks: Record<string, { id: string; label: string; startDay: number; endDay: number; start: number; end: number; emoji: string }[]> = {
     sugarcane: [
-      { id: 'germination', label: 'Germination', startDay: 1, endDay: 30 },
-      { id: 'vegetative', label: 'Tillering', startDay: 31, endDay: 100 },
-      { id: 'flowering', label: 'Grand growth', startDay: 101, endDay: 200 },
-      { id: 'fruit_set', label: 'Cane maturity', startDay: 201, endDay: 300 },
-      { id: 'ripening', label: 'Ripening', startDay: 301, endDay: 360 },
-      { id: 'harvest', label: 'Harvest', startDay: 361, endDay: 400 },
+      { id: 'germination', label: 'Germination', startDay: 1, endDay: 30, start: 1, end: 30, emoji: '🌱' },
+      { id: 'vegetative', label: 'Tillering', startDay: 31, endDay: 100, start: 31, end: 100, emoji: '🌿' },
+      { id: 'flowering', label: 'Grand growth', startDay: 101, endDay: 200, start: 101, end: 200, emoji: '🌼' },
+      { id: 'fruit_set', label: 'Cane maturity', startDay: 201, endDay: 300, start: 201, end: 300, emoji: '🍃' },
+      { id: 'ripening', label: 'Ripening', startDay: 301, endDay: 360, start: 301, end: 360, emoji: '🧺' },
+      { id: 'harvest', label: 'Harvest', startDay: 361, endDay: 400, start: 361, end: 400, emoji: '✅' },
     ],
     cotton: [
-      { id: 'germination', label: 'Emergence', startDay: 1, endDay: 20 },
-      { id: 'vegetative', label: 'Square formation', startDay: 21, endDay: 55 },
-      { id: 'flowering', label: 'Flowering', startDay: 56, endDay: 90 },
-      { id: 'fruit_set', label: 'Boll development', startDay: 91, endDay: 130 },
-      { id: 'ripening', label: 'Boll opening', startDay: 131, endDay: 160 },
-      { id: 'harvest', label: 'Picking', startDay: 161, endDay: 180 },
+      { id: 'germination', label: 'Emergence', startDay: 1, endDay: 20, start: 1, end: 20, emoji: '🌱' },
+      { id: 'vegetative', label: 'Square formation', startDay: 21, endDay: 55, start: 21, end: 55, emoji: '🌿' },
+      { id: 'flowering', label: 'Flowering', startDay: 56, endDay: 90, start: 56, end: 90, emoji: '🌼' },
+      { id: 'fruit_set', label: 'Boll development', startDay: 91, endDay: 130, start: 91, end: 130, emoji: '🧵' },
+      { id: 'ripening', label: 'Boll opening', startDay: 131, endDay: 160, start: 131, end: 160, emoji: '🧺' },
+      { id: 'harvest', label: 'Picking', startDay: 161, endDay: 180, start: 161, end: 180, emoji: '✅' },
     ],
     onion: [
-      { id: 'germination', label: 'Transplant establish', startDay: 1, endDay: 20 },
-      { id: 'vegetative', label: 'Leaf growth', startDay: 21, endDay: 55 },
-      { id: 'fruit_set', label: 'Bulb initiation', startDay: 56, endDay: 90 },
-      { id: 'ripening', label: 'Bulb swelling', startDay: 91, endDay: 120 },
-      { id: 'harvest', label: 'Harvest & curing', startDay: 121, endDay: 140 },
+      { id: 'germination', label: 'Transplant establish', startDay: 1, endDay: 20, start: 1, end: 20, emoji: '🌱' },
+      { id: 'vegetative', label: 'Leaf growth', startDay: 21, endDay: 55, start: 21, end: 55, emoji: '🌿' },
+      { id: 'fruit_set', label: 'Bulb initiation', startDay: 56, endDay: 90, start: 56, end: 90, emoji: '🧅' },
+      { id: 'ripening', label: 'Bulb swelling', startDay: 91, endDay: 120, start: 91, end: 120, emoji: '🧺' },
+      { id: 'harvest', label: 'Harvest & curing', startDay: 121, endDay: 140, start: 121, end: 140, emoji: '✅' },
     ],
     soybean: [
-      { id: 'germination', label: 'Emergence', startDay: 1, endDay: 15 },
-      { id: 'vegetative', label: 'Vegetative', startDay: 16, endDay: 40 },
-      { id: 'flowering', label: 'Flowering', startDay: 41, endDay: 60 },
-      { id: 'fruit_set', label: 'Pod set', startDay: 61, endDay: 85 },
-      { id: 'ripening', label: 'Seed fill', startDay: 86, endDay: 110 },
-      { id: 'harvest', label: 'Maturity', startDay: 111, endDay: 125 },
+      { id: 'germination', label: 'Emergence', startDay: 1, endDay: 15, start: 1, end: 15, emoji: '🌱' },
+      { id: 'vegetative', label: 'Vegetative', startDay: 16, endDay: 40, start: 16, end: 40, emoji: '🌿' },
+      { id: 'flowering', label: 'Flowering', startDay: 41, endDay: 60, start: 41, end: 60, emoji: '🌼' },
+      { id: 'fruit_set', label: 'Pod set', startDay: 61, endDay: 85, start: 61, end: 85, emoji: '🫘' },
+      { id: 'ripening', label: 'Seed fill', startDay: 86, endDay: 110, start: 86, end: 110, emoji: '🧺' },
+      { id: 'harvest', label: 'Maturity', startDay: 111, endDay: 125, start: 111, end: 125, emoji: '✅' },
     ],
   };
   if (tracks[id]) return tracks[id];
   // Default field crop track
   return [
-    { id: 'germination', label: 'Establishment', startDay: 1, endDay: 20 },
-    { id: 'vegetative', label: 'Vegetative growth', startDay: 21, endDay: 55 },
-    { id: 'flowering', label: 'Reproductive', startDay: 56, endDay: 85 },
-    { id: 'fruit_set', label: 'Fruit / grain fill', startDay: 86, endDay: 115 },
-    { id: 'ripening', label: 'Ripening', startDay: 116, endDay: 140 },
-    { id: 'harvest', label: 'Harvest', startDay: 141, endDay: 160 },
+    { id: 'germination', label: 'Establishment', startDay: 1, endDay: 20, start: 1, end: 20, emoji: '🌱' },
+    { id: 'vegetative', label: 'Vegetative growth', startDay: 21, endDay: 55, start: 21, end: 55, emoji: '🌿' },
+    { id: 'flowering', label: 'Reproductive', startDay: 56, endDay: 85, start: 56, end: 85, emoji: '🌼' },
+    { id: 'fruit_set', label: 'Fruit / grain fill', startDay: 86, endDay: 115, start: 86, end: 115, emoji: '🌾' },
+    { id: 'ripening', label: 'Ripening', startDay: 116, endDay: 140, start: 116, end: 140, emoji: '🧺' },
+    { id: 'harvest', label: 'Harvest', startDay: 141, endDay: 160, start: 141, end: 160, emoji: '✅' },
   ];
 }
 
 function mapSimStageToCropStage(
   simStage: string,
-  cropStages: { id: string; label: string; startDay: number; endDay: number }[],
+  cropStages: { id: string; label: string; startDay: number; endDay: number; start: number; end: number; emoji: string }[],
   day: number,
-): { id: string; label: string; startDay: number; endDay: number } {
+): { id: string; label: string; startDay: number; endDay: number; start: number; end: number; emoji: string } {
   const byId = cropStages.find((s) => s.id === simStage);
   if (byId) return byId;
   const byDay = cropStages.find((s) => day >= s.startDay && day <= s.endDay);

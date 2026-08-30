@@ -153,7 +153,7 @@ function MiniTrend({
   value: string;
   dataKey: string;
   color: string;
-  data: typeof TREND_7;
+  data: Array<Record<string, string | number>>;
 }) {
   return (
     <div className="bg-[#0f1722] rounded-xl border border-[#1e2d40] p-3 flex flex-col min-h-[120px]">

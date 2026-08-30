@@ -6,8 +6,7 @@ import {
 } from 'lucide-react';
 import {
   ResponsiveContainer, ComposedChart, Line, Bar, XAxis, YAxis,
-  CartesianGrid, Tooltip, Legend, Area, AreaChart, BarChart, RadarChart,
-  PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
+  CartesianGrid, Tooltip, Legend, Area, AreaChart, BarChart
 } from 'recharts';
 import { API_BASE } from './api/client';
 import { fetchBackendWeatherRaw } from './api/weather';
@@ -316,6 +315,75 @@ const WeatherIcon = ({ type, size = 20, className = '' }: { type: string; size?:
   if (type === 'partly') return <CloudSun size={size} className={className || 'text-amber-300'} />;
   return <Sun size={size} className={className || 'text-amber-400'} />;
 };
+
+function CustomRadarChart({ data }: { data: { metric: string; value: number }[] }) {
+  if (!data.length) return null;
+
+  const cx = 120;
+  const cy = 120;
+  const maxRadius = 84;
+  const rings = [20, 40, 60, 80, 100];
+  const angleStep = (Math.PI * 2) / data.length;
+
+  return (
+    <svg viewBox="0 0 240 240" className="h-full w-full">
+      <defs>
+        <linearGradient id="radarFill" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0%" stopColor="#10b981" stopOpacity="0.8" />
+          <stop offset="100%" stopColor="#10b981" stopOpacity="0.18" />
+        </linearGradient>
+      </defs>
+
+      {rings.map((ring) => {
+        const radius = (ring / 100) * maxRadius;
+        const points = Array.from({ length: data.length }, (_, i) => {
+          const angle = -Math.PI / 2 + i * angleStep;
+          const x = cx + Math.cos(angle) * radius;
+          const y = cy + Math.sin(angle) * radius;
+          return `${x},${y}`;
+        }).join(' ');
+        return <polygon key={ring} points={points} fill="none" stroke="#1e2d40" strokeWidth="1" />;
+      })}
+
+      {data.map((point, i) => {
+        const angle = -Math.PI / 2 + i * angleStep;
+        const x = cx + Math.cos(angle) * maxRadius;
+        const y = cy + Math.sin(angle) * maxRadius;
+        const labelX = cx + Math.cos(angle) * (maxRadius + 18);
+        const labelY = cy + Math.sin(angle) * (maxRadius + 18);
+        return (
+          <g key={point.metric}>
+            <line x1={cx} y1={cy} x2={x} y2={y} stroke="#1e2d40" strokeWidth="1" />
+            <text x={labelX} y={labelY} fill="#94a3b8" fontSize="10" textAnchor="middle" dominantBaseline="middle">
+              {point.metric}
+            </text>
+          </g>
+        );
+      })}
+
+      <polygon
+        points={data.map((point, i) => {
+          const angle = -Math.PI / 2 + i * angleStep;
+          const valueRadius = (Math.min(Math.max(point.value, 0), 100) / 100) * maxRadius;
+          const x = cx + Math.cos(angle) * valueRadius;
+          const y = cy + Math.sin(angle) * valueRadius;
+          return `${x},${y}`;
+        }).join(' ')}
+        fill="url(#radarFill)"
+        stroke="#10b981"
+        strokeWidth="2"
+      />
+
+      {data.map((point, i) => {
+        const angle = -Math.PI / 2 + i * angleStep;
+        const valueRadius = (Math.min(Math.max(point.value, 0), 100) / 100) * maxRadius;
+        const x = cx + Math.cos(angle) * valueRadius;
+        const y = cy + Math.sin(angle) * valueRadius;
+        return <circle key={`${point.metric}-dot`} cx={x} cy={y} r="3" fill="#10b981" />;
+      })}
+    </svg>
+  );
+}
 
 /* ─── Backend API (shared client) ───────────────────────────────────────── */
 const WEATHER_API_BASE = API_BASE;
@@ -832,12 +900,21 @@ export default function WeatherPanel({
   useEffect(() => {
     let cancelled = false;
     const next = resolveCity();
+
+    setProfileHint((prev) => {
+      const nextHint = next
+        ? null
+        : 'Set City + coordinates in Settings → Save to load live weather for your farm.';
+      return prev === nextHint ? prev : nextHint;
+    });
+
     if (!next) {
-      setProfileHint('Set City + coordinates in Settings → Save to load live weather for your farm.');
-      setSelected(null);
+      setSelected((prev) => {
+        if (!prev) return prev;
+        return null;
+      });
       return;
     }
-    setProfileHint(null);
 
     const apply = (city: CityOption) => {
       if (cancelled) return;
@@ -1532,15 +1609,7 @@ export default function WeatherPanel({
                 <h3 className="text-sm font-bold text-white mb-3">Climate Balance (Radar)</h3>
                 <div className="h-[260px]">
                   {radarData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <RadarChart data={radarData}>
-                        <PolarGrid stroke="#1e2d40" />
-                        <PolarAngleAxis dataKey="metric" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 9 }} />
-                        <Radar name="Current" dataKey="value" stroke="#10b981" fill="#10b981" fillOpacity={0.35} />
-                        <Tooltip contentStyle={tooltipStyle} />
-                      </RadarChart>
-                    </ResponsiveContainer>
+                    <CustomRadarChart data={radarData} />
                   ) : (
                     <div className="h-full flex items-center justify-center text-slate-500 text-sm">Loading…</div>
                   )}
