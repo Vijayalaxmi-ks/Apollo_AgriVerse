@@ -1,4 +1,4 @@
-import { API_BASE, apiGet } from './client';
+import { API_BASE, apiGet } from './api/client';
 
 export type BackendWeatherPayload = {
   status: string;

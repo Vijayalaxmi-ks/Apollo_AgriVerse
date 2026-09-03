@@ -20,6 +20,8 @@ from typing import Any, Optional
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -197,6 +199,9 @@ class FarmEvaluationRequest(BaseModel):
 
 @app.get("/")
 def root():
+    frontend_index = _BACKEND_ROOT.parent / "04_Frontend" / "Apollo_final_frontend" / "preview-app" / "dist" / "index.html"
+    if frontend_index.exists():
+        return FileResponse(frontend_index)
     return {
         "project": "Apollo AgriVerse",
         "status": "API is running",
@@ -880,6 +885,11 @@ def twin_step(payload: TwinStepRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+_FRONTEND_DIST = _BACKEND_ROOT.parent / "04_Frontend" / "Apollo_final_frontend" / "preview-app" / "dist"
+if _FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
 
 
 if __name__ == "__main__":

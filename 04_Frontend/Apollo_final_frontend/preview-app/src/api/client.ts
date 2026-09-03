@@ -3,7 +3,10 @@
 export const API_BASE =
   (typeof import.meta !== 'undefined' &&
     (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_API_BASE) ||
-  'http://127.0.0.1:8000';
+  ((typeof import.meta !== 'undefined' &&
+    (import.meta as ImportMeta & { env?: Record<string, boolean> }).env?.DEV)
+    ? 'http://127.0.0.1:8000'
+    : '');
 
 export class ApiError extends Error {
   status: number;

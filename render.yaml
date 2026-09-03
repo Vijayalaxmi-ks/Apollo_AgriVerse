@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: apollo-agriverse
+    runtime: python
+    buildCommand: >-
+      python -m pip install -r 05_Backend/requirements.txt &&
+      cd 04_Frontend/Apollo_final_frontend/preview-app &&
+      npm install && npm run build
+    startCommand: cd 05_Backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
