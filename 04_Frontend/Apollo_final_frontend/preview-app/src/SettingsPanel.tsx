@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Settings, Save, RotateCcw, Bell, BellOff, Monitor, MapPin, CloudRain,
   Leaf, Beaker, Gauge, Shield, Smartphone, Moon, Sun, Volume2,
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { SimState, SoilClassId, GrapeVarietyId, FieldInfo } from './simulation';
 import { saveFarmProfile } from './api/farm';
+import { geocodeCity } from './api/weather';
 import {
   FIELDS,
   SOIL_CLASSES,
@@ -159,6 +160,62 @@ export default function SettingsPanel({
 
   const [section, setSection] = useState<'farm' | 'soilcrop' | 'sim' | 'alerts' | 'display' | 'data' | 'account'>('farm');
   const [newProfileName, setNewProfileName] = useState('');
+  const [geoStatus, setGeoStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle');
+  const [geoHint, setGeoHint] = useState('');
+  const geoTimerRef = useRef<number | null>(null);
+  const geoReqId = useRef(0);
+  /** When true, next city-driven geocode may overwrite lat/lon (user typed city). */
+  const autoGeoEnabled = useRef(true);
+
+  // Auto-fill latitude / longitude when farmer types a city (debounced).
+  // Skips if coords were edited manually, or if city already has matching coords (load/hydration).
+  useEffect(() => {
+    const city = (cfg.city || '').trim();
+    if (city.length < 2) {
+      setGeoStatus('idle');
+      setGeoHint('');
+      return;
+    }
+    if (!autoGeoEnabled.current) return;
+
+    if (geoTimerRef.current) window.clearTimeout(geoTimerRef.current);
+    geoTimerRef.current = window.setTimeout(() => {
+      const req = ++geoReqId.current;
+      setGeoStatus('loading');
+      setGeoHint('Looking up coordinates…');
+      void geocodeCity(city).then((hit) => {
+        if (req !== geoReqId.current) return;
+        if (!hit) {
+          setGeoStatus('fail');
+          setGeoHint('City not found — enter lat/lon manually');
+          return;
+        }
+        // Avoid noisy overwrite when hydrated profile already has same coords
+        const curLat = cfg.latitude === '' ? null : Number(cfg.latitude);
+        const curLon = cfg.longitude === '' ? null : Number(cfg.longitude);
+        const same =
+          curLat != null &&
+          curLon != null &&
+          Math.abs(curLat - hit.latitude) < 0.02 &&
+          Math.abs(curLon - hit.longitude) < 0.02;
+        if (!same) {
+          setSettings({
+            latitude: hit.latitude,
+            longitude: hit.longitude,
+          });
+        }
+        setGeoStatus('ok');
+        setGeoHint(
+          `${hit.latitude}, ${hit.longitude} · ${hit.source === 'backend' ? 'from weather API' : 'from Open-Meteo'}`,
+        );
+      });
+    }, 650);
+
+    return () => {
+      if (geoTimerRef.current) window.clearTimeout(geoTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg.city]);
 
   const FIELD_CROP_KEY = 'agriverse-field-crops-v1';
   const [fieldCropMap, setFieldCropMap] = useState<Record<string, string>>(() => {
@@ -1030,8 +1087,9 @@ export default function SettingsPanel({
                   <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {!profileComplete && (
                       <div className="sm:col-span-2 rounded-xl border border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[10px] text-amber-200/90 leading-relaxed">
-                        Fields start empty. Enter farm name, city, latitude &amp; longitude, then{' '}
-                        <strong>Save &amp; refresh APIs</strong>. Farm / region / soil IDs are auto-generated from your entries — no static demo farmer data.
+                        Fields start empty. Enter farm name and <strong>city</strong> — latitude &amp; longitude fill
+                        automatically. Then <strong>Save &amp; refresh APIs</strong>. Farm / region / soil IDs are
+                        auto-generated from your entries.
                       </div>
                     )}
                     {(
@@ -1039,7 +1097,6 @@ export default function SettingsPanel({
                         { key: 'farmId' as const, label: 'Farm ID', ph: 'Auto on save' },
                         { key: 'regionId' as const, label: 'Region ID', ph: 'Auto on save' },
                         { key: 'soilId' as const, label: 'Soil ID', ph: 'Auto on save' },
-                        { key: 'city' as const, label: 'City (weather)', ph: 'e.g. Nashik' },
                       ] as const
                     ).map((f) => (
                       <div key={f.key}>
@@ -1052,6 +1109,35 @@ export default function SettingsPanel({
                         />
                       </div>
                     ))}
+                    <div>
+                      <div className={labelCls}>
+                        <MapPin size={10} /> City (weather)
+                      </div>
+                      <input
+                        className={inputCls}
+                        value={cfg.city}
+                        placeholder="e.g. Nashik, Solapur, Pune"
+                        onChange={(e) => {
+                          autoGeoEnabled.current = true;
+                          patch('city', e.target.value);
+                        }}
+                      />
+                      {geoStatus !== 'idle' && (
+                        <div
+                          className={`mt-1 text-[9px] ${
+                            geoStatus === 'loading'
+                              ? 'text-sky-400'
+                              : geoStatus === 'ok'
+                                ? 'text-emerald-400'
+                                : 'text-amber-400'
+                          }`}
+                        >
+                          {geoStatus === 'loading' && 'Resolving coordinates…'}
+                          {geoStatus === 'ok' && `✓ ${geoHint}`}
+                          {geoStatus === 'fail' && geoHint}
+                        </div>
+                      )}
+                    </div>
                     <div>
                       <div className={labelCls}>Water availability</div>
                       <select
@@ -1071,10 +1157,11 @@ export default function SettingsPanel({
                         type="number"
                         step="0.0001"
                         value={cfg.latitude}
-                        placeholder="e.g. 19.9975"
-                        onChange={(e) =>
-                          patch('latitude', e.target.value === '' ? '' : Number(e.target.value))
-                        }
+                        placeholder="Auto from city"
+                        onChange={(e) => {
+                          autoGeoEnabled.current = false;
+                          patch('latitude', e.target.value === '' ? '' : Number(e.target.value));
+                        }}
                       />
                     </div>
                     <div>
@@ -1084,10 +1171,11 @@ export default function SettingsPanel({
                         type="number"
                         step="0.0001"
                         value={cfg.longitude}
-                        placeholder="e.g. 73.7898"
-                        onChange={(e) =>
-                          patch('longitude', e.target.value === '' ? '' : Number(e.target.value))
-                        }
+                        placeholder="Auto from city"
+                        onChange={(e) => {
+                          autoGeoEnabled.current = false;
+                          patch('longitude', e.target.value === '' ? '' : Number(e.target.value));
+                        }}
                       />
                     </div>
                     <div className="sm:col-span-2 flex flex-wrap gap-2">

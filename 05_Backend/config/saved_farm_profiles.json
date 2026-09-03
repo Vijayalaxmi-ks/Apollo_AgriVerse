@@ -62,50 +62,58 @@
     "operator": "Farm Manager",
     "region": "Maharashtra",
     "district": "Nashik",
-    "city": "Nashik",
+    "city": "nashik",
     "latitude": 20.0059,
     "longitude": 73.7797,
     "water_availability": "medium",
     "primary_crop": "grape",
-    "default_soil_class": "lateritic",
+    "default_soil_class": "alluvial",
     "field_count": 2,
     "fields": [
       {
         "field_id": "A",
         "name": "Field A",
-        "acres": 2.2,
+        "acres": 5.44,
         "soil_class": "alluvial",
         "crop_id": "grape",
         "grape_variety": "sharad",
-        "notes": "Thompson Seedless vines; slightly higher irrigation requirement; monitored soil moisture."
+        "area_ha": "2.20",
+        "yield_t_per_ha": "18.5",
+        "density_per_ha": "1650",
+        "irrigation_mm": "520",
+        "notes": "Healthy Thompson Seedless block; drip irrigation and hydrogel-assisted moisture retention."
       },
       {
         "field_id": "B",
         "name": "Field B",
-        "acres": 2.35,
-        "soil_class": "red",
+        "acres": 5.81,
+        "soil_class": "alluvial",
         "crop_id": "grape",
         "grape_variety": "tas_a_ganesh",
-        "notes": "Healthy Thompson Seedless block; drip irrigation and hydrogel-assisted moisture retention."
+        "area_ha": "2.35",
+        "yield_t_per_ha": "17.2",
+        "density_per_ha": "1580",
+        "irrigation_mm": "550",
+        "notes": "Thompson Seedless vines; slightly higher irrigation requirement; monitored soil moisture."
       }
     ],
     "measures": {
       "A": {
-        "areaHa": "2.35",
-        "yieldTPerHa": "17.2",
-        "densityPerHa": "1580",
-        "irrigationMm": "550",
-        "notes": "Thompson Seedless vines; slightly higher irrigation requirement; monitored soil moisture."
-      },
-      "B": {
         "areaHa": "2.20",
         "yieldTPerHa": "18.5",
         "densityPerHa": "1650",
         "irrigationMm": "520",
         "notes": "Healthy Thompson Seedless block; drip irrigation and hydrogel-assisted moisture retention."
+      },
+      "B": {
+        "areaHa": "2.35",
+        "yieldTPerHa": "17.2",
+        "densityPerHa": "1580",
+        "irrigationMm": "550",
+        "notes": "Thompson Seedless vines; slightly higher irrigation requirement; monitored soil moisture."
       }
     },
     "profile_label": "My Grape Farm",
-    "saved_at": "2026-08-29T15:54:37.067737+00:00"
+    "saved_at": "2026-08-31T08:03:23.013269+00:00"
   }
 }

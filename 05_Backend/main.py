@@ -5,6 +5,9 @@ Apollo AgriVerse unified API:
   - POST /api/evaluate
   - GET  /api/market/spot | /api/market/arbitrage
   - GET  /api/farm/default
+  - GET  /api/farm/active
+  - POST /api/farm/profile
+  - GET  /api/farm/profile/{farm_id}
   - GET  /api/ml/status
   - POST /api/ml/yield
   - POST /api/ml/telemetry
@@ -205,6 +208,8 @@ def root():
             "/api/market/spot",
             "/api/market/arbitrage",
             "/api/farm/default",
+            "/api/farm/active",
+            "/api/farm/profile",
             "/api/ml/status",
             "/api/ml/yield",
             "/api/ml/telemetry",
@@ -268,6 +273,9 @@ def weather(
         raise HTTPException(status_code=400, detail=result.get("message", "Unable to fetch weather"))
     result["city"] = location["city"]
     result["country"] = location["country"]
+    # Always expose resolved coordinates for Settings auto-fill
+    result["latitude"] = location["latitude"]
+    result["longitude"] = location["longitude"]
     result["status"] = result.get("status") or "success"
     return result
 
@@ -386,10 +394,38 @@ def market_arbitrage(
 
 
 
+def _load_active_farm_record() -> dict:
+    """Load the last-saved active farm profile (full record with fields)."""
+    import json
+    cfg_dir = Path(__file__).resolve().parent / "config"
+    saved_path = cfg_dir / "saved_farm_profiles.json"
+    profile_path = cfg_dir / "farm_profile.json"
+    record: dict = {}
+    if saved_path.exists():
+        try:
+            store = json.loads(saved_path.read_text(encoding="utf-8"))
+            if isinstance(store, dict):
+                active_id = store.get("_active_farm_id")
+                if active_id and isinstance(store.get(active_id), dict):
+                    record = dict(store[active_id])
+                elif isinstance(store.get("farm_id"), str):
+                    # legacy single-object file
+                    record = {k: v for k, v in store.items() if not str(k).startswith("_")}
+        except Exception:
+            record = {}
+    if not record and profile_path.exists():
+        try:
+            slim = json.loads(profile_path.read_text(encoding="utf-8"))
+            if isinstance(slim, dict):
+                record = slim
+        except Exception:
+            pass
+    return record
+
+
 @app.get("/api/farm/default")
 def farm_default():
-    """Default farm profile for Settings bootstrap."""
-    profile_path = Path(__file__).resolve().parent / "config" / "farm_profile.json"
+    """Default farm profile for Settings bootstrap — includes active field_count + fields."""
     data = {
         "farm_id": "FARM_MH_NASHIK_01",
         "region_id": "REG_0002",
@@ -399,14 +435,45 @@ def farm_default():
         "longitude": 73.7898,
         "city": "Nashik",
         "farm_area_ha": 2.5,
+        "field_count": 4,
+        "primary_crop": "grape",
+        "default_soil_class": "alluvial",
+        "fields": [],
     }
-    if profile_path.exists():
-        import json
-        try:
-            data.update(json.loads(profile_path.read_text()))
-        except Exception:
-            pass
+    active = _load_active_farm_record()
+    if active:
+        for key in (
+            "farm_id",
+            "region_id",
+            "soil_id",
+            "water_availability",
+            "latitude",
+            "longitude",
+            "city",
+            "farm_name",
+            "primary_crop",
+            "default_soil_class",
+            "field_count",
+            "fields",
+            "measures",
+            "operator",
+            "region",
+            "district",
+        ):
+            if active.get(key) is not None:
+                data[key] = active[key]
+        if active.get("fields") and not data.get("field_count"):
+            data["field_count"] = len(active["fields"])
     return {"success": True, "data": data}
+
+
+@app.get("/api/farm/active")
+def farm_active():
+    """Return the full active saved profile (fields, measures, field_count) for twin hydration."""
+    record = _load_active_farm_record()
+    if not record:
+        return {"success": True, "data": None}
+    return {"success": True, "data": record}
 
 
 # ---------------------------------------------------------------------
@@ -562,7 +629,10 @@ def save_farm_profile(payload: FarmProfileSaveRequest):
         "city": record.get("city"),
         "farm_name": record.get("farm_name"),
         "primary_crop": record.get("primary_crop"),
-        "field_count": record.get("field_count"),
+        "default_soil_class": record.get("default_soil_class"),
+        "field_count": record.get("field_count")
+        or (len(record["fields"]) if isinstance(record.get("fields"), list) else None),
+        "fields": record.get("fields") or [],
     }
     profile_path.write_text(json.dumps(slim, indent=2), encoding="utf-8")
 
