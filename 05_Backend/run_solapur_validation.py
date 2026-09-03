@@ -9,7 +9,6 @@ datasets_dir = base_dir / "02_Datasets"
 loader = KnowledgeBaseLoader(str(datasets_dir)).load_and_validate()
 api_service = ExternalDataService()
 
-# Initialize the engine for Maharashtra, focusing on Pomegranate or Jowar/Pigeonpea which thrive in Solapur
 engine = AgronomicSuitabilityEngine(
     loader=loader,
     api_service=api_service,
@@ -17,19 +16,18 @@ engine = AgronomicSuitabilityEngine(
     focus_crop="POMEGRANATE",
 )
 
-# Custom farm profile for Solapur (using shallow/medium black soil & semi-arid coordinates)
 solapur_farm = {
-  "farm_id": "FARM_MH_SOLAPUR_01",
-  "region_id": "REG_0005",             # Replace with the exact region_id from your regions.csv for Solapur
-  "district": "Solapur",               # Added helper key for direct lookup
-  "soil_id": "SOIL_00001",
-  "water_availability": "low",
-  "latitude": 17.6599,
-  "longitude": 75.9064,
-  "farm_area_ha": 3.0
+    "farm_id": "FARM_MH_SOLAPUR_RED_01",
+    "region_id": "REG_0666",
+    "district": "Solapur",
+    "soil_id": "SOIL_00002",
+    "soil_type": "Red Soil",
+    "water_availability": "medium",
+    "latitude": 17.6599,
+    "longitude": 75.9064,
+    "farm_area_ha": 3.0,
 }
 
-# Run the evaluation
 report = engine.evaluate_farm(solapur_farm, top_n=3)
 
 print("\n" + "=" * 72)
@@ -51,17 +49,17 @@ top_crops = report["primary_recommendations"][:3]
 for rank, rec in enumerate(top_crops, start=1):
     market = rec["score_tree"]["market"]
     price_text = f"₹{market['modal_price']}/qtl" if market["modal_price"] is not None else "price unavailable"
-    
+
     print(
         f"\n{rank}. {rec['crop_name'].upper()} — "
         f"Suitability Score: {rec['final_suitability_score']:.1f}% "
         f"({rec['suitability_band']}) | Mandi Price: {price_text}"
     )
-    
-    if rec["recommended_varieties"]:
+
+    if rec.get("variety_recommendations"):
         print("   🌱 Recommended Varieties:")
-        for var in rec["recommended_varieties"]:
-            print(f"      - {var['variety_name']} ({var['duration']}) | {var['trait']}")
+        for var in rec["variety_recommendations"][:3]:
+            print(f"      - {var['variety_name']} ({var.get('duration', 'N/A')}) | {var.get('trait', 'General suitability')}")
 
     print("   ✅ Key Advantages:")
     for pro in rec["pros"][:2]:
